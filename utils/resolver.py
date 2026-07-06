@@ -20,7 +20,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     dataset_kwargs = kwargs.get('data_args', {})
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
-    model_choices = ['LDNA', 'DeeperGCN', 'EGC', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA']
+    model_choices = ['LDNA', 'DeeperGCN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA']
     dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba']
 
     # Load the dataset

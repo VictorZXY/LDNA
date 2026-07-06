@@ -176,3 +176,6 @@ data/
 local_tests/
 out/
 playground.*
+
+# Claude Code local settings (personal, per-machine)
+.claude/settings.local.json
