@@ -86,7 +86,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 |---|---|---|
 | `GCN`, `GIN`, `GINE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` |
 | `GraphSAGE` | partial | code exists (`models/sage.py`), configs exist; not run yet |
-| `GNN-VPA` | todo | variance-preserving aggregation; implement as a `models/` wrapper matching the shared `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface |
+| `GNN-VPA` | done | `models/vpa.py` (`VPA`): GIN/GINE backbone with PyG built-in `VariancePreservingAggregation` (`sum/√N`) via `aggr=`; dual-path (edge datasets→GINEConv, edge-less→GINConv); shared interface. Resolver query `GNN-VPA` |
 
 ---
 
@@ -242,13 +242,22 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
 
 ## Compute & parallelism
 
-- The machine has **4 GPUs** (indices `0`–`3`). Training pins to one GPU via the
-  config `cuda` field (`train.py`: `cuda: <idx>`, `-1` = CPU). Each run is one process.
-- **Run many experiments concurrently** — one process per config, each on a distinct
-  GPU — to saturate the available share. Grid over {datasets × models} maps naturally
-  onto separate configs.
-- **GPU etiquette:** before launching, check `nvidia-smi`; only use GPUs that are
-  idle. If others are using some GPUs, use the free ones and leave theirs alone.
+- The machine has **4 GPUs** (indices `0`–`3`, RTX A6000 49GB, no MIG). Training pins
+  to one GPU via the config `cuda` field (`train.py`: `cuda: <idx>`, `-1` = CPU). Each
+  run is one process.
+- **Run many experiments concurrently** — one process per config — to saturate the
+  GPUs. Grid over {datasets × models} maps naturally onto separate configs.
+- **GPU policy** (before launching, always check `nvidia-smi`):
+  - **Prefer idle GPUs first**, then **aim to keep all 4 GPUs busy** with our work.
+  - Sharing is allowed: you may run **multiple of our own jobs on one GPU**, and you may
+    **co-locate on a GPU another user is using** (compute is time-sliced — both sides
+    slow down, but that is acceptable here).
+  - **The one hard constraint: never OOM anyone** (ours or theirs). Keep the combined
+    VRAM on each card within its 49GB — size batch/hidden so each process's peak fits the
+    free headroom, release cache between search trials (`torch.cuda.empty_cache()`), make
+    searches OOM-tolerant (`study.optimize(catch=(RuntimeError,))`), and watch per-card
+    free memory (a safety monitor alerts if any card's free VRAM drops into the danger
+    zone). If a card gets tight, back our jobs off rather than risk a collision.
 - Scaling is done **through configs only** — no code changes needed to parallelize.
 
 ---
@@ -273,7 +282,9 @@ Mirror of `AGENTS.md` (§ Autonomous optimization); concrete limits here.
 - **Implementing** new datasets, baselines, or node-level task support IS a sanctioned
   code change (distinct from tuning-time edits) — but keep the shared model interface
   and the canonical-sort design intact, and prefer minimal diffs.
-- GPU etiquette above is a hard rule: never preempt another user's GPU.
+- GPU policy above (§ Compute & parallelism): prefer idle GPUs, aim to keep all 4 busy,
+  sharing (multiple of our jobs per GPU, or co-locating with other users) is allowed —
+  the one hard rule is **never OOM anyone**.
 - Stop-and-report conditions (any one triggers stop + report):
   1. **Target reached** — LDNA is top-2 on the dataset (ideally #1 with a non-trivial
      SEM margin per § Objective).
@@ -292,12 +303,12 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 **Graph-level (do these first, in order):**
 
-- [ ] Implement `GNN-VPA` baseline wrapper in `models/` (shared
+- [x] Implement `GNN-VPA` baseline wrapper in `models/` (`models/vpa.py`; shared
       `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface; available to all datasets).
-- [ ] Add `ogbg-ppa` to the pipeline (graph-level; constant/degree node features; OGB evaluator).
-- [ ] Add `ogbg-code2` to the pipeline (graph-level; confirm target head + F1 evaluator).
-- [ ] Extend `hyperparam_search.py` to **all** graph-level datasets — it currently supports
-      only `ogbg-molhiv` / `ogbg-molpcba` / `ZINC`; add `MNISTSuperpixels`, `ogbg-ppa`,
+- [ ] Add `ogbg-ppa` to the pipeline (graph-level; constant node features; OGB evaluator via `PPAEvaluator` wrapper).
+- [ ] Add `ogbg-code2` to the pipeline (graph-level; needs a dedicated seq-head + F1 eval path — see spec).
+- [~] Extend `hyperparam_search.py` to **all** graph-level datasets — `MNISTSuperpixels` **done**
+      (search also arch-aligned to `readout: attention` + `residual: true`); still add `ogbg-ppa`,
       `ogbg-code2` (per-dataset evaluator, direction, loss, batch_size).
 - [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every
       graph-level dataset — do this after GNN-VPA and the items above are in place.

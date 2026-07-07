@@ -125,9 +125,12 @@ def train_LDNA(
     # ---- Load device ----
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
 
-    # Release GPU cache left by the previous trial so co-located jobs on the same
-    # (shared) GPU are not starved of memory between trials.
+    # Cap this process's share of the (shared) GPU and release cache left by the previous
+    # trial, so a large sampled model can never OOM a co-located job on the same card. The
+    # cap is deterministic: configs that don't fit the budget raise OOM and are skipped by
+    # the study's `catch=(RuntimeError,)` rather than eating another tenant's memory.
     if device.type == 'cuda':
+        torch.cuda.set_per_process_memory_fraction(0.30, device.index)
         torch.cuda.empty_cache()
 
     # ---- Load data ----

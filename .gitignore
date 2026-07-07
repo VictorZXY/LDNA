@@ -175,6 +175,7 @@ cython_debug/
 data/
 local_tests/
 out/
+logs/
 playground.*
 
 # Claude Code local settings (personal, per-machine)

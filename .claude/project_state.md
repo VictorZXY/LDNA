@@ -32,6 +32,21 @@
 - The repository is usable as an experiment runner.
 - The repository is not documented as a packaged project.
 - The current repository contents are centered on graph-level experiments.
+- `GNN-VPA` baseline added (`models/vpa.py`, class `VPA`): GIN/GINE backbone with the PyG
+  built-in `VariancePreservingAggregation` (`sum/√N`) injected via `aggr=`; dual-path
+  (edge datasets → `GINEConv`, edge-less → `GINConv`); shared interface; resolver query
+  `GNN-VPA`. Committed `a4d55e2`.
+- `hyperparam_search.py` extended to `MNISTSuperpixels`, arch-aligned so the search tunes
+  under the same architecture as the final runs (`readout: attention` + `residual: true`),
+  and hardened for shared-GPU co-tenancy (per-process VRAM cap
+  `set_per_process_memory_fraction`, `empty_cache` between trials, `catch=(RuntimeError,)`
+  so an OOM trial is skipped instead of aborting the study).
+- Two torch≥2.6 / PyG 2.7 compatibility fixes (needed to load MNIST/ZINC/OGB): 
+  `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
+  `weights_only=False` shim.
+- LDNA hyperparameter searches (100 trials each) currently running for `ogbg-molhiv`,
+  `ZINC`, `ogbg-molpcba`, `MNISTSuperpixels`, one per GPU. GPU policy: prefer idle, keep
+  all 4 busy, share freely, never OOM anyone (see `.claude/experiments.md`).
 
 ---
 
