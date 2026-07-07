@@ -91,7 +91,7 @@ class DeeperGCN(nn.Module):
         if self.edge_encoder is not None:
             edge_attr = self.edge_encoder(edge_attr)
 
-        x = self.layers[0](x, edge_index=edge_index, edge_attr=edge_attr)
+        x = self.layers[0].conv(x, edge_index=edge_index, edge_attr=edge_attr)
         for layer in self.layers[1:]:
             x = layer(x, edge_index=edge_index, edge_attr=edge_attr)
         x = self.layers[0].act(self.layers[0].norm(x))
