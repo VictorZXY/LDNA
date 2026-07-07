@@ -363,7 +363,9 @@ invalid after the architecture change):
 4. **Rank** LDNA vs. baselines by the § Objective margin and append to § Results log.
 
 - [ ] `ogbg-molhiv`
-- [ ] `ogbg-molpcba`
+- [ ] `ogbg-molpcba` — **search capped** at best-value plateau or ~25-30 trials (whichever
+      first; user 2026-07-07), then broadcast best-so-far. **Ranking stays full** (11 models
+      × 3 runs × 150 epochs — no reduction). 350k graphs → the compute outlier.
 - [ ] `ZINC`
 - [ ] `MNISTSuperpixels`
 - [ ] `ogbg-code2` (edge-less pipeline landed; run after a GPU frees)
