@@ -352,8 +352,13 @@ run these steps independently — **do not reuse any past hyperparameters** (the
 invalid after the architecture change):
 
 1. **Tune LDNA from scratch** on the dataset with `hyperparam_search.py`.
-2. **Broadcast** the tuned shared config verbatim to **all** baselines — GCN, GIN, GINE,
-   GraphSAGE, GAT, GATv2, PNA, EGC, DeeperGCN, GNN-VPA (§ Tuning methodology).
+2. **Broadcast** the tuned shared config verbatim to all baselines via `broadcast.py`
+   (`python broadcast.py --dataset <D> --hidden_channels .. --num_layers .. --dropout ..
+   --lr .. --weight_decay .. --gpus 0,1,2,3`). It overrides only the shared knobs in each
+   model's config (model-internal settings preserved), creates the `GNN-VPA` config, and
+   round-robins `cuda`. Baseline set per § Tuning methodology + the GIN-xor-GINE rule:
+   GCN, **{GINE if edge else GIN}**, GraphSAGE, GAT, GATv2, PNA, EGC, DeeperGCN
+   (softmax+powermean), GNN-VPA — plus LDNA.
 3. **Run** LDNA + all baselines on the dataset with `train.py` (multi-run).
 4. **Rank** LDNA vs. baselines by the § Objective margin and append to § Results log.
 
@@ -361,7 +366,7 @@ invalid after the architecture change):
 - [ ] `ogbg-molpcba`
 - [ ] `ZINC`
 - [ ] `MNISTSuperpixels`
-- [ ] `ogbg-code2` (after its edge-less pipeline + search support land)
+- [ ] `ogbg-code2` (edge-less pipeline landed; run after a GPU frees)
 
 ---
 
