@@ -121,6 +121,7 @@ def train_LDNA(
         patience: int = 20,
         min_delta: float = 1e-3,
         device='cuda:0',
+        mem_fraction: float = 0.30,
 ):
     # ---- Load device ----
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
@@ -130,7 +131,7 @@ def train_LDNA(
     # cap is deterministic: configs that don't fit the budget raise OOM and are skipped by
     # the study's `catch=(RuntimeError,)` rather than eating another tenant's memory.
     if device.type == 'cuda':
-        torch.cuda.set_per_process_memory_fraction(0.30, device.index)
+        torch.cuda.set_per_process_memory_fraction(mem_fraction, device.index)
         torch.cuda.empty_cache()
 
     # ---- Load data ----
@@ -220,7 +221,8 @@ def train_LDNA(
 
 
 def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
-              min_delta: float = 1e-3, device: str = 'cuda:0') -> float:
+              min_delta: float = 1e-3, device: str = 'cuda:0',
+              mem_fraction: float = 0.30) -> float:
     # --- Search spaces for the hyperparameters ---
     hidden_channels = trial.suggest_categorical('hidden_channels', [128, 256, 512, 1024])
     num_layers = trial.suggest_int('num_layers', 2, 10)
@@ -245,6 +247,7 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
         patience=patience,
         min_delta=min_delta,
         device=device,
+        mem_fraction=mem_fraction,
     )
 
     return result
@@ -271,7 +274,7 @@ def main(args):
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
                                     epochs=args.epochs, patience=args.patience,
-                                    min_delta=args.min_delta),
+                                    min_delta=args.min_delta, mem_fraction=args.mem_fraction),
             n_trials=args.n_trials,
             catch=(RuntimeError,),
         )
@@ -292,6 +295,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels'], required=True)
     parser.add_argument('--device', default='cuda:0')
+    # Cap on this process's share of the (shared) GPU. Lower it on cards with an extra
+    # co-tenant so a large sampled model can't OOM another user's job (see § GPU policy).
+    parser.add_argument('--mem_fraction', type=float, default=0.30)
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--patience', type=int, default=20)
     parser.add_argument('--min_delta', type=float, default=1e-3)
