@@ -206,6 +206,11 @@ def main(args):
             device = torch.device('cpu')
         print(f"Device: {device}")
 
+        # Cap this process's share of the (shared) GPU so a ranking run can't OOM a
+        # co-located job (another user's, or another of ours). See § GPU policy.
+        if device.type == 'cuda':
+            torch.cuda.set_per_process_memory_fraction(args.mem_fraction, device.index)
+
         model, train_loader, val_loader, test_loader = model_and_data_resolver(
             args.model, args.dataset, model_args=(args.model_args or {}), data_args=(args.data_args or {})
         )
@@ -245,6 +250,7 @@ if __name__ == '__main__':
 
     # Training specific arguments/hyperparameters
     parser.add_argument('--cuda', default=-1, type=int)
+    parser.add_argument('--mem_fraction', default=0.30, type=float)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--train_args', default=None, type=yaml.safe_load)
     parser.add_argument('--checkpoint_dir', default='checkpoints/', type=str)
