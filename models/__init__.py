@@ -10,6 +10,7 @@ from .gin import GIN
 from .gine import GINE
 from .pna import PNA
 from .sage import GraphSAGE
+from .vpa import VPA
 
 __all__ = [
     'DeeperGCN',
@@ -23,5 +24,6 @@ __all__ = [
     'GCN',
     'GIN',
     'GINE',
-    'PNA'
+    'PNA',
+    'VPA'
 ]

@@ -26,6 +26,11 @@ def _get_study_settings(dataset: str) -> dict:
             'direction': 'minimize',
             'best_value_label': 'Best Validation MAE',
         }
+    elif dataset == 'MNISTSuperpixels':
+        return {
+            'direction': 'maximize',
+            'best_value_label': 'Best Validation Accuracy',
+        }
 
     raise ValueError(f"Unsupported dataset '{dataset}'")
 
@@ -42,7 +47,8 @@ def _get_training_config(
         'out_channels': hidden_channels,
         'num_layers': num_layers,
         'dropout': dropout,
-        'readout': 'mean',
+        'readout': 'attention',
+        'residual': True,
     }
 
     if dataset == 'ogbg-molhiv':
@@ -86,6 +92,18 @@ def _get_training_config(
             'evaluator_kwargs': {},
             'scheduler_mode': 'min',
         }
+    elif dataset == 'MNISTSuperpixels':
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/mnist/',
+                'batch_size': batch_size,
+            },
+            'loss_query': 'CrossEntropyLoss',
+            'evaluator_query': 'MNISTEvaluator',
+            'evaluator_kwargs': {},
+            'scheduler_mode': 'max',
+        }
 
     raise ValueError(f"Unsupported dataset '{dataset}'")
 
@@ -106,6 +124,11 @@ def train_LDNA(
 ):
     # ---- Load device ----
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
+
+    # Release GPU cache left by the previous trial so co-located jobs on the same
+    # (shared) GPU are not starved of memory between trials.
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     # ---- Load data ----
     config = _get_training_config(
@@ -201,7 +224,7 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     dropout = trial.suggest_float('dropout', 0.0, 0.7)
     # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
     # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
-    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128}[dataset]
+    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256}[dataset]
     lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
 
@@ -238,12 +261,16 @@ def main(args):
                 interval_steps=1),  # Check for pruning every epoch
         )
 
-        # Optimize the objective function for N trials
+        # Optimize the objective function for N trials. `catch=(RuntimeError,)` keeps the
+        # study alive when an individual trial fails (e.g. a CUDA OOM from a large sampled
+        # model while sharing the GPU) — that trial is marked failed and the search continues
+        # instead of aborting the whole run.
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
                                     epochs=args.epochs, patience=args.patience,
                                     min_delta=args.min_delta),
             n_trials=args.n_trials,
+            catch=(RuntimeError,),
         )
 
         # Print out the best trial
@@ -260,7 +287,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba'], required=True)
+    parser.add_argument('--dataset', choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels'], required=True)
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--patience', type=int, default=20)

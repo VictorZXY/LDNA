@@ -20,7 +20,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     dataset_kwargs = kwargs.get('data_args', {})
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
-    model_choices = ['LDNA', 'DeeperGCN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA']
+    model_choices = ['LDNA', 'DeeperGCN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
     dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba']
 
     # Load the dataset
@@ -119,6 +119,8 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             deg += torch.bincount(d, minlength=deg.numel())
 
         model = models.PNA(deg=deg, **model_kwargs)
+    elif model_query in ('GNN-VPA', 'VPA'):
+        model = models.VPA(**model_kwargs)
     else:
         raise ValueError(f"Could not resolve dataset '{model_query}' among choices {model_choices}")
 
