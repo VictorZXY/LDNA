@@ -48,8 +48,16 @@ exists but not tuned/run; `todo` = not implemented.
 | `ogbg-molpcba` | multi-task binary (128) | AP | max | `OGBGraphPropPredEvaluator` | partial | code + configs exist; not tuned/run |
 | `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired + configs; search uses `subset=True` (~10k), final training uses full ZINC; **re-run needed** |
 | `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired + configs; not in `hyperparam_search.py` yet; **re-run needed** |
-| `ogbg-ppa` | 37-way classification | accuracy | max | `OGBGraphPropPredEvaluator` | todo | edge features; no informative node features (use constant/degree) |
-| `ogbg-code2` | AST subtoken prediction | F1 | max | `OGBGraphPropPredEvaluator` | todo | sequence-style target; confirm head + evaluator wiring |
+| `ogbg-code2` | AST subtoken prediction | F1 | max | `Code2Evaluator` (OGB F1) | todo | **edge-less** (GIN family, no `edge_attr`); needs dedicated seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass; skip lexsort (AST DFS order is canonical) |
+
+> **`ogbg-ppa` removed from scope** (2026-07-07): ppa has no node features, so the feature-based
+> canonical sort cannot impose a **permutation-invariant** node order (identical features → the
+> sort falls back to input order). LDNA *requires* a canonical order so its MLP aggregator is
+> permutation invariant (the sort is a correctness requirement, **not** a performance booster —
+> LDNA's gain comes from the aggregator). Giving ppa a well-defined order needs a bespoke rule;
+> not worth it given the four graph-level datasets already cover binary / multi-task / regression /
+> multi-class. `ogbg-code2` is kept: its AST nodes have a natural DFS order (permutation invariant),
+> so LDNA works there by using that order directly (skip the feature lexsort).
 
 > **Prior graph-level results are invalidated** by the recent shared architecture change
 > (`readout: attention` + `residual` + unified encoder width). Every wired graph-level
@@ -305,11 +313,12 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 - [x] Implement `GNN-VPA` baseline wrapper in `models/` (`models/vpa.py`; shared
       `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface; available to all datasets).
-- [ ] Add `ogbg-ppa` to the pipeline (graph-level; constant node features; OGB evaluator via `PPAEvaluator` wrapper).
-- [ ] Add `ogbg-code2` to the pipeline (graph-level; needs a dedicated seq-head + F1 eval path — see spec).
-- [~] Extend `hyperparam_search.py` to **all** graph-level datasets — `MNISTSuperpixels` **done**
-      (search also arch-aligned to `readout: attention` + `residual: true`); still add `ogbg-ppa`,
-      `ogbg-code2` (per-dataset evaluator, direction, loss, batch_size).
+- [ ] Add `ogbg-code2` to the pipeline (graph-level; **edge-less/GIN**, no `edge_attr`): dedicated
+      seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass +
+      `ASTNodeEncoder` (type/attr/depth); **skip lexsort** (AST DFS order). Touches `train.py`.
+- [~] Extend `hyperparam_search.py` to all graph-level datasets — `MNISTSuperpixels` **done**
+      (search also arch-aligned to `readout: attention` + `residual: true`); still add `ogbg-code2`
+      (F1 evaluator, maximize, code2 loss/eval loop, batch_size).
 - [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every
       graph-level dataset — do this after GNN-VPA and the items above are in place.
 
@@ -351,8 +360,7 @@ invalid after the architecture change):
 - [ ] `ogbg-molpcba`
 - [ ] `ZINC`
 - [ ] `MNISTSuperpixels`
-- [ ] `ogbg-ppa` (after its pipeline + search support land)
-- [ ] `ogbg-code2` (after its pipeline + search support land)
+- [ ] `ogbg-code2` (after its edge-less pipeline + search support land)
 
 ---
 
