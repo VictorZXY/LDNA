@@ -60,16 +60,16 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # Update model kwargs
+    # Update model kwargs. The node/edge encoders map to the model width, so every conv is
+    # hidden -> hidden (uniform width across all models) and residual skips are identity.
+    embedding_dim = model_kwargs['hidden_channels']
     if dataset_query == 'MNISTSuperpixels':
-        embedding_dim = model_kwargs['hidden_channels'] if model_query == 'DeeperGCN' else 128
         model_kwargs.update({
             'in_channels': embedding_dim,
             'node_encoder': nn.Linear(1, embedding_dim),
             'num_pred_heads': train_dataset.num_classes
         })
     elif dataset_query == 'ZINC':
-        embedding_dim = model_kwargs['hidden_channels'] if model_query == 'DeeperGCN' else 128
         model_kwargs.update({
             'in_channels': embedding_dim,
             'edge_dim': embedding_dim,
@@ -78,7 +78,6 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'num_pred_heads': 1
         })
     elif dataset_query in ['ogbg-molhiv', 'ogbg-molpcba']:
-        embedding_dim = model_kwargs['hidden_channels'] if model_query == 'DeeperGCN' else 128
         model_kwargs.update({
             'in_channels': embedding_dim,
             'edge_dim': embedding_dim,

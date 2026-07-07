@@ -10,7 +10,7 @@ from configargparse import YAMLConfigFileParser
 from torch import nn
 from torch_geometric.nn.resolver import optimizer_resolver, lr_scheduler_resolver
 
-from utils import Logger, evaluator_resolver, loss_resolver, model_and_data_resolver
+from utils import Logger, evaluator_resolver, loss_resolver, model_and_data_resolver, tee_to_file
 
 
 @torch.no_grad()
@@ -109,34 +109,36 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
 
 
 def main(args):
-    if args.cuda != -1:
-        device = torch.device('cuda:' + str(args.cuda) if torch.cuda.is_available() else 'cpu')
-    else:
-        device = torch.device('cpu')
-    print(f"Device: {device}")
+    log_path = os.path.join(args.log_dir, f'{args.experiment_name}.txt') if args.log_dir is not None else None
+    with tee_to_file(log_path):
+        if args.cuda != -1:
+            device = torch.device('cuda:' + str(args.cuda) if torch.cuda.is_available() else 'cpu')
+        else:
+            device = torch.device('cpu')
+        print(f"Device: {device}")
 
-    model, train_loader, val_loader, test_loader = model_and_data_resolver(
-        args.model, args.dataset, model_args=(args.model_args or {}), data_args=(args.data_args or {})
-    )
-    print(f"Dataset name: {args.dataset}")
-    print(f"Model name: {args.model}")
+        model, train_loader, val_loader, test_loader = model_and_data_resolver(
+            args.model, args.dataset, model_args=(args.model_args or {}), data_args=(args.data_args or {})
+        )
+        print(f"Dataset name: {args.dataset}")
+        print(f"Model name: {args.model}")
 
-    model, logger, run_times = train(model, train_loader, val_loader, test_loader, args.train_args, device)
-    print(f"Finished Training {args.model} on {args.dataset} dataset")
-    logger.print_statistics()
-    avg_run_time = sum(run_times) / len(run_times)
-    if avg_run_time >= 3600:
-        print(f"Average run time: {(avg_run_time / 3600):.3f} hours")
-    elif avg_run_time >= 60:
-        print(f"Average run time: {(avg_run_time / 60):.3f} minutes")
-    else:
-        print(f"Average run time: {avg_run_time:.3f} seconds")
+        model, logger, run_times = train(model, train_loader, val_loader, test_loader, args.train_args, device)
+        print(f"Finished Training {args.model} on {args.dataset} dataset")
+        logger.print_statistics()
+        avg_run_time = sum(run_times) / len(run_times)
+        if avg_run_time >= 3600:
+            print(f"Average run time: {(avg_run_time / 3600):.3f} hours")
+        elif avg_run_time >= 60:
+            print(f"Average run time: {(avg_run_time / 60):.3f} minutes")
+        else:
+            print(f"Average run time: {avg_run_time:.3f} seconds")
 
-    if args.checkpoint_dir is not None:
-        torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f'{args.experiment_name}.pt'))
-    if args.log_dir is not None:
-        with open(os.path.join(args.log_dir, f'{args.experiment_name}_logger.pickle'), 'wb') as f:
-            pickle.dump(logger, f)
+        if args.checkpoint_dir is not None:
+            torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f'{args.experiment_name}.pt'))
+        if args.log_dir is not None:
+            with open(os.path.join(args.log_dir, f'{args.experiment_name}_logger.pickle'), 'wb') as f:
+                pickle.dump(logger, f)
 
 
 if __name__ == '__main__':

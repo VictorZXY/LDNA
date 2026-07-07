@@ -2,6 +2,7 @@ import math
 
 import torch.nn.functional as F
 from torch import nn
+from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.nn.models import MLP
 from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.nn.pool import global_add_pool, global_max_pool, global_mean_pool
@@ -16,7 +17,7 @@ class LDNA(nn.Module):
                  channel_list=None, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None,
                  edge_dim=None, node_encoder=None, edge_encoder=None, num_pre_layers=1, num_post_layers=1,
                  num_pred_heads=None, num_pred_layers=3, readout=None, dropout=0.0, batch_norm=True,
-                 act='relu', act_first=False, act_kwargs=None, **kwargs):
+                 residual=False, act='relu', act_first=False, act_kwargs=None, **kwargs):
         super(LDNA, self).__init__()
 
         if in_channels is not None:
@@ -44,6 +45,15 @@ class LDNA(nn.Module):
             else:
                 self.batch_norms.append(None)
 
+        # Per-layer residual connections. Where a layer changes width the skip is a
+        # learnable linear projection; where it does not it is a parameter-free identity.
+        self.residual = residual
+        self.res_projs = nn.ModuleList()
+        if residual:
+            for in_channels, out_channels in zip(channel_list[:-1], channel_list[1:]):
+                self.res_projs.append(nn.Identity() if in_channels == out_channels
+                                      else nn.Linear(in_channels, out_channels))
+
         self.act = activation_resolver(act, **(act_kwargs or {}))
         self.act_first = act_first
 
@@ -57,6 +67,10 @@ class LDNA(nn.Module):
         self.readout = readout
         if readout == 'gru':
             self.readout_gru = nn.GRU(input_size=out_channels, hidden_size=out_channels, batch_first=True)
+        elif readout == 'attention':
+            out_channels = channel_list[-1]
+            gate_nn = MLP(in_channels=out_channels, hidden_channels=out_channels, out_channels=1, num_layers=2)
+            self.readout_attention = AttentionalAggregation(gate_nn=gate_nn)
 
         self.num_pred_heads = num_pred_heads
         if num_pred_heads:
@@ -77,8 +91,13 @@ class LDNA(nn.Module):
         for batch_norm in self.batch_norms:
             if batch_norm is not None:
                 batch_norm.reset_parameters()
+        for res_proj in self.res_projs:
+            if hasattr(res_proj, 'reset_parameters'):
+                res_proj.reset_parameters()
         if self.readout == 'gru':
             self.readout_gru.reset_parameters()
+        elif self.readout == 'attention':
+            self.readout_attention.reset_parameters()
         if self.num_pred_heads:
             self.pred_nn.reset_parameters()
 
@@ -88,7 +107,8 @@ class LDNA(nn.Module):
         if self.edge_encoder is not None:
             edge_attr = self.edge_encoder(edge_attr)
 
-        for conv, batch_norm, dropout in zip(self.convs, self.batch_norms, self.dropout):
+        for i, (conv, batch_norm, dropout) in enumerate(zip(self.convs, self.batch_norms, self.dropout)):
+            x_res = x
             x = conv(x, edge_index=edge_index, edge_attr=edge_attr)
 
             if self.act is not None and self.act_first:
@@ -99,6 +119,9 @@ class LDNA(nn.Module):
                 x = self.act(x)
 
             x = F.dropout(x, p=dropout, training=self.training)
+
+            if self.residual:
+                x = x + self.res_projs[i](x_res)
 
         if self.readout == 'gru':
             x_dense, mask = to_dense_batch(x, batch)
@@ -112,6 +135,8 @@ class LDNA(nn.Module):
             x = global_max_pool(x, batch)
         elif self.readout == 'mean':
             x = global_mean_pool(x, batch)
+        elif self.readout == 'attention':
+            x = self.readout_attention(x, batch)
 
         if self.num_pred_heads:
             x = self.pred_nn(x)

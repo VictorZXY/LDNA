@@ -2,6 +2,7 @@ import math
 
 import torch.nn.functional as F
 from torch import nn
+from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.nn.conv import GATv2Conv
 from torch_geometric.nn.models import MLP
 from torch_geometric.nn.norm import BatchNorm
@@ -14,7 +15,8 @@ class GATv2(nn.Module):
     def __init__(self, *,
                  channel_list=None, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None,
                  edge_dim=None, node_encoder=None, edge_encoder=None, num_pred_heads=None, num_pred_layers=3, 
-                 readout=None, dropout=0.0, batch_norm=True, act='relu', act_first=False, act_kwargs=None, **kwargs):
+                 readout=None, dropout=0.0, batch_norm=True, residual=False,
+                 act='relu', act_first=False, act_kwargs=None, **kwargs):
         super(GATv2, self).__init__()
 
         if in_channels is not None:
@@ -42,12 +44,25 @@ class GATv2(nn.Module):
             else:
                 self.batch_norms.append(None)
 
+        # Per-layer residual connections: identity skip where widths match, learnable
+        # linear projection where the layer changes width (e.g. the 128 -> hidden first layer).
+        self.residual = residual
+        self.res_projs = nn.ModuleList()
+        if residual:
+            for in_channels, out_channels in zip(channel_list[:-1], channel_list[1:]):
+                self.res_projs.append(nn.Identity() if in_channels == out_channels
+                                      else nn.Linear(in_channels, out_channels))
+
         self.act = activation_resolver(act, **(act_kwargs or {}))
         self.act_first = act_first
 
         self.readout = readout
         if readout == 'gru':
             self.readout_gru = nn.GRU(input_size=out_channels, hidden_size=out_channels, batch_first=True)
+        elif readout == 'attention':
+            out_channels = channel_list[-1]
+            gate_nn = MLP(in_channels=out_channels, hidden_channels=out_channels, out_channels=1, num_layers=2)
+            self.readout_attention = AttentionalAggregation(gate_nn=gate_nn)
 
         self.num_pred_heads = num_pred_heads
         if num_pred_heads:
@@ -68,8 +83,13 @@ class GATv2(nn.Module):
         for batch_norm in self.batch_norms:
             if batch_norm is not None:
                 batch_norm.reset_parameters()
+        for res_proj in self.res_projs:
+            if hasattr(res_proj, 'reset_parameters'):
+                res_proj.reset_parameters()
         if self.readout == 'gru':
             self.readout_gru.reset_parameters()
+        elif self.readout == 'attention':
+            self.readout_attention.reset_parameters()
         if self.num_pred_heads:
             self.pred_nn.reset_parameters()
 
@@ -79,7 +99,8 @@ class GATv2(nn.Module):
         if self.edge_encoder is not None:
             edge_attr = self.edge_encoder(edge_attr)
 
-        for conv, batch_norm in zip(self.convs, self.batch_norms):
+        for i, (conv, batch_norm) in enumerate(zip(self.convs, self.batch_norms)):
+            x_res = x
             x = conv(x, edge_index=edge_index, edge_attr=edge_attr)
 
             if self.act is not None and self.act_first:
@@ -88,6 +109,9 @@ class GATv2(nn.Module):
                 x = batch_norm(x)
             if self.act is not None and not self.act_first:
                 x = self.act(x)
+
+            if self.residual:
+                x = x + self.res_projs[i](x_res)
 
         if self.readout == 'gru':
             x_dense, mask = to_dense_batch(x, batch)
@@ -101,6 +125,8 @@ class GATv2(nn.Module):
             x = global_max_pool(x, batch)
         elif self.readout == 'mean':
             x = global_mean_pool(x, batch)
+        elif self.readout == 'attention':
+            x = self.readout_attention(x, batch)
 
         if self.num_pred_heads:
             x = self.pred_nn(x)

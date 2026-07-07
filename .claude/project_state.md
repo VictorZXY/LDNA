@@ -14,6 +14,20 @@
 - Baseline GNN model wrappers are present in `models/`.
 - Dataset preprocessing, sorting, evaluators, logger, and resolver code are present in `utils/`.
 - A generic Optuna search script (`hyperparam_search.py`) is present for MolHIV, MolPCBA, and ZINC.
+  `MedianPruner` is enabled and search trials **early-stop on plateau** (`patience=20`,
+  `min_delta=1e-3`); the search uses a low **epoch cap of 50** while final training runs
+  the full **150**. `n_trials` defaults to 100, and `batch_size` is a fixed per-dataset
+  power of 2 (hiv/mnist 256, molpcba/zinc 512; ZINC search subset uses 128).
+- `readout` (now incl. `attention` = `AttentionalAggregation`) and an optional per-layer
+  `residual` flag are shared, config-selectable knobs supported by every model family
+  (LDNA + all baselines); `DeeperGCN` keeps its intrinsic `res+` and ignores the flag.
+  The resolver now maps every model's encoder to the model width
+  (`embedding_dim = hidden_channels`, previously `128` for non-DeeperGCN), so the conv
+  stack is uniform and residual skips are identity (a learnable linear projection is kept
+  as a safety net for `out_channels ≠ hidden_channels`). All current configs set
+  `readout: attention` + `residual: true`.
+- `train.py` and `hyperparam_search.py` tee stdout/stderr to a per-run `logs/<name>.txt`
+  via `utils/tee.py` (`Tee` / `tee_to_file`).
 - Python dependencies are listed in `requirements.txt`.
 - The repository is usable as an experiment runner.
 - The repository is not documented as a packaged project.

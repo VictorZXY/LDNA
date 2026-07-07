@@ -10,7 +10,8 @@ model_args:
   num_pred_layers: 3
   aggregator: powermean
   dropout: 0.05
-  readout: mean
+  readout: attention
+  residual: true
 
 # Dataset specific arguments/hyperparameters
 dataset: ZINC

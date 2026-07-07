@@ -11,13 +11,14 @@ model_args:
   eps: 0.0
   train_eps: True
   dropout: 0.05
-  readout: mean
+  readout: attention
+  residual: true
 
 # Dataset specific arguments/hyperparameters
 dataset: MNISTSuperpixels
 data_args:
   root: data/mnist/
-  batch_size: 512
+  batch_size: 256
 
 # Training specific arguments/hyperparameters
 cuda: 0

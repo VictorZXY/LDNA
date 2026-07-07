@@ -8,13 +8,14 @@ model_args:
   num_layers: 4
   num_pred_layers: 3
   dropout: 0.05
-  readout: mean
+  readout: attention
+  residual: true
 
 # Dataset specific arguments/hyperparameters
 dataset: ogbg-molhiv
 data_args:
   root: data/
-  batch_size: 512
+  batch_size: 256
 
 # Training specific arguments/hyperparameters
 cuda: 0

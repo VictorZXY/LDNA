@@ -1,11 +1,12 @@
 import argparse
+import os
 from statistics import median
 
 import optuna
 import torch
 from torch import nn
 
-from utils import evaluator_resolver, loss_resolver, model_and_data_resolver
+from utils import evaluator_resolver, loss_resolver, model_and_data_resolver, tee_to_file
 
 
 def _get_study_settings(dataset: str) -> dict:
@@ -99,6 +100,8 @@ def train_LDNA(
         lr: float = 1e-3,
         weight_decay: float = 1e-5,
         epochs: int = 50,
+        patience: int = 20,
+        min_delta: float = 1e-3,
         device='cuda:0',
 ):
     # ---- Load device ----
@@ -128,6 +131,9 @@ def train_LDNA(
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode=config['scheduler_mode'])
 
     all_results = []
+    mode = config['scheduler_mode']
+    best_metric = None
+    epochs_no_improve = 0
 
     for epoch in range(epochs):
         # ---- Training ----
@@ -164,10 +170,22 @@ def train_LDNA(
         all_results.append(result)
         scheduler.step(result)
 
-        # # ---- Pruning ----
-        # trial.report(result, step=epoch)
-        # if trial.should_prune():
-        #     raise optuna.TrialPruned()
+        # ---- Pruning ----
+        trial.report(result, step=epoch)
+        if trial.should_prune():
+            raise optuna.TrialPruned()
+
+        # ---- Early stopping: stop once the validation metric has saturated ----
+        # An improvement counts only if it clears `min_delta` over the best so far, so
+        # sub-`min_delta` wiggles near saturation don't keep resetting the patience counter.
+        if best_metric is None or (result > best_metric + min_delta if mode == 'max'
+                                   else result < best_metric - min_delta):
+            best_metric = result
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+        if epochs_no_improve >= patience:
+            break
 
     if epochs < 5:
         return median(all_results)
@@ -175,12 +193,15 @@ def train_LDNA(
     return median(all_results[-5:])
 
 
-def objective(trial, dataset: str, epochs: int = 50, device: str = 'cuda:0') -> float:
+def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
+              min_delta: float = 1e-3, device: str = 'cuda:0') -> float:
     # --- Search spaces for the hyperparameters ---
     hidden_channels = trial.suggest_categorical('hidden_channels', [128, 256, 512, 1024])
     num_layers = trial.suggest_int('num_layers', 2, 10)
     dropout = trial.suggest_float('dropout', 0.0, 0.7)
-    batch_size = 512
+    # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
+    # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
+    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128}[dataset]
     lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
 
@@ -195,6 +216,8 @@ def objective(trial, dataset: str, epochs: int = 50, device: str = 'cuda:0') -> 
         lr=lr,
         weight_decay=weight_decay,
         epochs=epochs,
+        patience=patience,
+        min_delta=min_delta,
         device=device,
     )
 
@@ -202,31 +225,35 @@ def objective(trial, dataset: str, epochs: int = 50, device: str = 'cuda:0') -> 
 
 
 def main(args):
-    settings = _get_study_settings(args.dataset)
+    log_path = os.path.join(args.log_dir, f'search_{args.dataset}.txt') if args.log_dir is not None else None
+    with tee_to_file(log_path):
+        settings = _get_study_settings(args.dataset)
 
-    # Create a study object
-    study = optuna.create_study(
-        direction=settings['direction'],
-        sampler=optuna.samplers.TPESampler(seed=args.seed),
-        # pruner=optuna.pruners.MedianPruner(
-        #     n_warmup_steps=10,  # No pruning the first 10 epochs
-        #     interval_steps=1)   # Check for pruning every epoch
-    )
+        # Create a study object
+        study = optuna.create_study(
+            direction=settings['direction'],
+            sampler=optuna.samplers.TPESampler(seed=args.seed),
+            pruner=optuna.pruners.MedianPruner(
+                n_warmup_steps=10,  # No pruning the first 10 epochs
+                interval_steps=1),  # Check for pruning every epoch
+        )
 
-    # Optimize the objective function for N trials
-    study.optimize(
-        lambda trial: objective(trial, dataset=args.dataset, device=args.device, epochs=args.epochs),
-        n_trials=args.n_trials,
-    )
+        # Optimize the objective function for N trials
+        study.optimize(
+            lambda trial: objective(trial, dataset=args.dataset, device=args.device,
+                                    epochs=args.epochs, patience=args.patience,
+                                    min_delta=args.min_delta),
+            n_trials=args.n_trials,
+        )
 
-    # Print out the best trial
-    best_trial = study.best_trial
-    print(f"Number of finished trials: {len(study.trials)}")
-    print("Best trial:")
-    print(f"  Value ({settings['best_value_label']}): {best_trial.value}")
-    print("  Params: ")
-    for key, value in best_trial.params.items():
-        print(f"    {key}: {value}")
+        # Print out the best trial
+        best_trial = study.best_trial
+        print(f"Number of finished trials: {len(study.trials)}")
+        print("Best trial:")
+        print(f"  Value ({settings['best_value_label']}): {best_trial.value}")
+        print("  Params: ")
+        for key, value in best_trial.params.items():
+            print(f"    {key}: {value}")
 
     return study
 
@@ -236,7 +263,10 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba'], required=True)
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--n_trials', type=int, default=50)
+    parser.add_argument('--patience', type=int, default=20)
+    parser.add_argument('--min_delta', type=float, default=1e-3)
+    parser.add_argument('--n_trials', type=int, default=100)
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--log_dir', type=str, default='logs/')
 
     main(parser.parse_args())

@@ -2,6 +2,7 @@ import math
 
 import torch.nn.functional as F
 from torch import nn
+from torch_geometric.nn.aggr import AttentionalAggregation
 from torch_geometric.nn.conv import GENConv
 from torch_geometric.nn.models import DeepGCNLayer, MLP
 from torch_geometric.nn.norm import BatchNorm
@@ -15,7 +16,7 @@ class DeeperGCN(nn.Module):
                  channel_list=None, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None,
                  edge_dim=None, node_encoder=None, edge_encoder=None, aggregator='softmax',
                  num_trans_layers=1, num_pred_heads=None, num_pred_layers=3, readout=None,
-                 dropout=0.0, batch_norm=True, act='relu', act_kwargs=None, **kwargs):
+                 dropout=0.0, batch_norm=True, residual=False, act='relu', act_kwargs=None, **kwargs):
         super(DeeperGCN, self).__init__()
 
         if in_channels is not None:
@@ -33,6 +34,9 @@ class DeeperGCN(nn.Module):
         self.node_encoder = node_encoder
         self.edge_encoder = edge_encoder
         self.aggregator = aggregator
+        # DeeperGCN uses intrinsic 'res+' residual blocks; the shared `residual` flag is
+        # accepted for interface parity but has no separate effect here.
+        self.residual = residual
 
         if isinstance(dropout, float):
             dropout = [dropout] * (len(channel_list) - 1)
@@ -53,6 +57,10 @@ class DeeperGCN(nn.Module):
         self.readout = readout
         if readout == 'gru':
             self.readout_gru = nn.GRU(input_size=out_channels, hidden_size=out_channels, batch_first=True)
+        elif readout == 'attention':
+            out_channels = channel_list[-1]
+            gate_nn = MLP(in_channels=out_channels, hidden_channels=out_channels, out_channels=1, num_layers=2)
+            self.readout_attention = AttentionalAggregation(gate_nn=gate_nn)
 
         self.num_pred_heads = num_pred_heads
         if num_pred_heads:
@@ -72,6 +80,8 @@ class DeeperGCN(nn.Module):
             layer.reset_parameters()
         if self.readout == 'gru':
             self.readout_gru.reset_parameters()
+        elif self.readout == 'attention':
+            self.readout_attention.reset_parameters()
         if self.num_pred_heads:
             self.pred_nn.reset_parameters()
 
@@ -99,6 +109,8 @@ class DeeperGCN(nn.Module):
             x = global_max_pool(x, batch)
         elif self.readout == 'mean':
             x = global_mean_pool(x, batch)
+        elif self.readout == 'attention':
+            x = self.readout_attention(x, batch)
 
         if self.num_pred_heads:
             x = self.pred_nn(x)

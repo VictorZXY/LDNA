@@ -16,10 +16,22 @@ Primary objective — **relative ranking, not an absolute score**:
 
 - On **every** dataset, LDNA must rank in the **top-2** across all baselines.
 - Ideally LDNA is **#1**, and when it is, the gap to #2 should be **non-trivial**
-  (larger than run-to-run noise). Quantify "non-trivial" per metric: TODO
-  (suggested default — margin exceeds the mean ± std overlap across the configured runs).
+  (larger than run-to-run noise). **Non-trivial margin** = LDNA's mean beats #2's
+  mean by more than the combined **standard error** (`SEM = std / sqrt(runs)`), i.e.
+  `mean_LDNA - SEM_LDNA > mean_2nd + SEM_2nd` (respecting each metric's direction).
+  Use SEM, not raw std: std measures run-to-run spread, SEM measures uncertainty of
+  the *mean*, which is what a ranking claim rests on. Increase `runs` (e.g. 10 on the
+  high-variance `ogbg-molhiv`) so the estimate is stable. As a **disclosed** fallback
+  when spread is large, best-of-N may be used — but applied **symmetrically** to LDNA
+  and every baseline, never LDNA-best vs. baseline-mean.
 
 Secondary objective — **fairness by shared hyperparameters** (see § Tuning methodology).
+
+Soft objective (preferred, **not required**) — **hyperparameter coherence across similar
+tasks**: LDNA's tuned settings should stay close for datasets in the same task family
+(e.g. the graph-level molecular datasets `ogbg-molhiv` / `ogbg-molpcba` / `ZINC`) rather
+than diverging wildly per dataset. Nice to have and worth reporting; do not sacrifice the
+primary ranking objective for it. See § Tuning methodology (3).
 
 ---
 
@@ -32,10 +44,17 @@ exists but not tuned/run; `todo` = not implemented.
 
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
-| `ogbg-molhiv` | binary classification | ROC-AUC | max | `OGBGraphPropPredEvaluator` | done | baseline dataset |
+| `ogbg-molhiv` | binary classification | ROC-AUC | max | `OGBGraphPropPredEvaluator` | done | wired + configs; **re-run needed** (see note) |
 | `ogbg-molpcba` | multi-task binary (128) | AP | max | `OGBGraphPropPredEvaluator` | partial | code + configs exist; not tuned/run |
+| `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired + configs; search uses `subset=True` (~10k), final training uses full ZINC; **re-run needed** |
+| `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired + configs; not in `hyperparam_search.py` yet; **re-run needed** |
 | `ogbg-ppa` | 37-way classification | accuracy | max | `OGBGraphPropPredEvaluator` | todo | edge features; no informative node features (use constant/degree) |
 | `ogbg-code2` | AST subtoken prediction | F1 | max | `OGBGraphPropPredEvaluator` | todo | sequence-style target; confirm head + evaluator wiring |
+
+> **Prior graph-level results are invalidated** by the recent shared architecture change
+> (`readout: attention` + `residual` + unified encoder width). Every wired graph-level
+> dataset (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`) must be **(re-)run**
+> under the current architecture; treat any earlier numbers as stale.
 
 ### 2. Node-level prediction
 
@@ -78,8 +97,22 @@ The evaluation is designed for **fair comparison via shared hyperparameters**:
 1. **Tune LDNA only.** Run the hyperparameter search on LDNA for each dataset.
 2. **Reuse LDNA's tuned config for every baseline on that dataset**, verbatim for
    the shared knobs (`num_layers`, `batch_size`, `lr`, `weight_decay`, `dropout`,
-   `hidden_channels`, epochs, optimizer/scheduler). Baselines are **not** separately tuned.
-   Model-internal-only settings that have no LDNA counterpart use each model's defaults.
+   `hidden_channels`, `readout`, `residual`, epochs, optimizer/scheduler). Baselines are
+   **not** separately tuned. Model-internal-only settings that have no LDNA counterpart
+   use each model's defaults.
+
+   `readout` and `residual` are **shared** knobs — every model family supports them, so
+   a value like `readout: attention` / `residual: true` is set identically for LDNA and
+   all baselines. `readout` includes `attention` (`AttentionalAggregation`); because the
+   canonical sort is applied on the data side, even the sort-exploiting `gru` readout is
+   available to every model. `residual` is implemented with **projection skips** — a
+   learnable `Linear` where a layer changes width, identity where it does not. The
+   resolver maps every model's node encoder to the model width
+   (`embedding_dim = hidden_channels`, unified across all models), so the conv stack is
+   uniform (`hidden -> hidden`) and the skips are plain identities; the projection is only
+   a safety net that engages if a config sets `out_channels ≠ hidden_channels`. Baselines
+   whose own paper defines a residual scheme (e.g. `DeeperGCN`'s `res+`, which already
+   relied on this unified width) keep it and ignore the shared `residual` flag.
 3. **Prefer similar hyperparameters across datasets.** Aim for one config that works
    everywhere; if that is not achievable, keep configs similar within a task family
    (graph-level / node-level / expressiveness). This is a preference, **not** a hard
@@ -87,6 +120,42 @@ The evaluation is designed for **fair comparison via shared hyperparameters**:
 
 The point is that any LDNA win must come from the method, not from LDNA getting a
 better-tuned config than the baselines.
+
+---
+
+## Escalation: when tuning is not enough
+
+"Iteratively optimize LDNA" means **escalate**, not just re-search. The loop per
+dataset:
+
+1. **Tune.** Run the Optuna search; take the best config.
+2. **Rank.** Run `train.py` (multi-run) for LDNA + all baselines on that config;
+   compare by the § Objective margin.
+3. **If LDNA is not top-2**, the cause is almost certainly *not* the search space —
+   change the **LDNA architecture non-trivially**, then go back to step 1.
+
+Note first: `readout` and `residual` are **shared** knobs (§ Tuning methodology), not
+LDNA-only levers — changing them changes every model, so they cannot by themselves
+explain an LDNA win. A genuine LDNA advantage must come from LDNA-specific structure:
+
+- **`LDNAConv` internals** — message-MLP depth/width, the learnable linear map, the
+  per-node sum, the post-MLP, normalization placement.
+- **Sort-exploiting mechanisms unique to LDNA** — structure that uses the canonical
+  node order more directly than a shared readout does.
+- **Depth/width knobs already exposed** — `num_pre_layers`, `num_post_layers`,
+  `num_pred_layers`.
+
+Invariants that must hold through every escalation (else the comparison is unfair or
+the method is no longer LDNA):
+
+- The **canonical-sort premise** stays (`utils/_utils.py`).
+- The **shared interface** `forward(x, edge_index, edge_attr, batch)` /
+  `reset_parameters()` stays, so the resolver and the baseline comparison keep working.
+- **Dataset splits/preprocessing stay**, and **baselines are never modified** to
+  flatter LDNA.
+
+Stop the escalation loop for a dataset after **3 consecutive architecture changes**
+that still fail to reach top-2 — stop and report instead of looping.
 
 ---
 
@@ -102,12 +171,52 @@ Baseline search space currently in `hyperparam_search.py::objective` (LDNA only;
 | `dropout` | [0.0, 0.7] | float |
 | `lr` | [1e-5, 1e-2] | log-uniform |
 | `weight_decay` | [1e-6, 1e-3] | log-uniform |
-| `batch_size` | 512 | fixed in code |
-| `epochs` | 50 | CLI default |
-| `n_trials` | 50 | CLI default; TPESampler, seed 42 |
+| `batch_size` | not searched — per-dataset, power of 2 | implemented (see batch-size policy below) |
+| `epochs` | search cap **50**; final **150** | search early-stops at plateau (`patience=20`, `min_delta=1e-3`); final runs the full 150 |
+| `n_trials` | **100** (pruning enabled) | CLI default; TPESampler, seed 42 |
 
-LDNA-specific knobs not yet in the search space (candidates to add): `num_pre_layers`,
-`num_post_layers`, `num_pred_layers`, `readout` (`add`/`max`/`mean`/`gru`), `batch_norm`, `act`.
+**batch-size policy.** `batch_size` is **not searched** — it entangles with `lr`
+(linear-scaling rule), so searching both wastes budget and muddies lr comparability. It is
+a fixed **per-dataset** value, **shared across all models** on that dataset (fairness
+holds). Prefer a **power of 2** sized so `steps/epoch = train_size / batch_size` stays
+~100–300: a universal 512 starves small datasets (ZINC `subset` ≈ 10k → ~20 steps/epoch)
+while being fine for large ones. Values now in `hyperparam_search.py` (search) and the
+configs (final):
+
+| Dataset | ~train graphs | batch_size | steps/epoch |
+|---|---|---|---|
+| `ogbg-molhiv` | 33k | 256 | ~128 |
+| `ogbg-molpcba` | 350k | 512 | ~684 |
+| `ZINC` (subset, search) | 10k | 128 | ~78 |
+| `ZINC` (full, final) | 220k | 512 | ~430 |
+| `MNISTSuperpixels` | 60k | 256 | ~234 |
+
+**Epochs.** Final (ranking) runs all use the **same `epochs` (150)** — kept uniform so
+models are comparable. The search uses a much lower **cap of 50** to bound tuning time,
+plus **early stopping on plateau**: a trial ends once the validation metric has not
+improved by at least **`min_delta` (default `1e-3`)** for **`patience=10`** epochs. The
+`min_delta` guard is essential — without it, a slow monotonic climb of sub-noise upticks
+would reset the patience counter every epoch and the trial would run to the cap; with it,
+only improvements that clear `1e-3` over the running best reset the counter, so true
+saturation is caught. `patience=20` is **twice** the `ReduceLROnPlateau` patience (10):
+the scheduler drops the LR at the first plateau and the resulting post-drop improvement is
+captured before the trial stops, so the search scores configs on their **LR-annealed**
+performance — the same regime the 150-epoch final runs use. (At `patience=10` the trial
+would stop at the first plateau, *before* any LR drop, and could mis-rank configs that
+only shine after annealing.) Post-saturation epochs don't change the trial score (median
+of the last 5), so this is free savings on top of pruning. (`min_delta` is an absolute
+threshold suited to the AUC/AP/MAE scales; raise it if trials still run to the cap.)
+
+**Pruning is enabled.** `MedianPruner` (`n_warmup_steps=10`) + `trial.report` /
+`should_prune` are active in `hyperparam_search.py`. Pruning and early stopping are
+complementary: pruning kills *bad* trials early relative to others; early stopping ends
+*any* trial once it saturates. Together, **`n_trials` defaults to 100** at roughly the
+wall-clock of 50 un-pruned full-length trials.
+
+Knobs not yet in the search space (candidates to add). Shared across all models (a
+searched value would apply to LDNA and every baseline): `readout`
+(`add`/`max`/`mean`/`gru`/`attention`), `residual`, `batch_norm`, `act`. LDNA-specific:
+`num_pre_layers`, `num_post_layers`, `num_pred_layers`.
 
 `hyperparam_search.py` must be **extended to accept all datasets in this playbook**
 (currently only the three graph-level ones). Node-level and expressiveness search
@@ -124,7 +233,10 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
   baselines using the mean test metric (respecting each metric's direction).
 - **Node-level & expressiveness** need their own evaluation paths (single-graph
   transductive accuracy; BREC's pairwise protocol). Define when implementing.
-- "Non-trivial margin": TODO (see § Objective).
+- "Non-trivial margin": SEM-based; defined in § Objective.
+- **Run logs:** every `train.py` run tees stdout+stderr to `logs/<experiment_name>.txt`
+  (built into `train.py`); the final numbers are also pickled to
+  `logs/<experiment_name>_logger.pickle`.
 
 ---
 
@@ -145,15 +257,31 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
 
 Mirror of `AGENTS.md` (§ Autonomous optimization); concrete limits here.
 
-- Compute budget per optimization session: TODO (e.g. max Optuna trials, max GPU-hours, wall-clock).
-- Off-limits **while tuning**: the canonical sort in `utils/_utils.py`; model
-  architecture contracts; dataset splits/preprocessing. Tune via configs / search spaces.
+- Compute budget per optimization session: **100 Optuna trials/dataset** (the default).
+  Three compute savers in the search: a low **epoch cap of 50** (vs 150 for final runs),
+  `MedianPruner` (`n_warmup_steps=10`) that kills *bad* trials early relative to others,
+  and **early stopping** (`patience=20`, `min_delta=1e-3`) that ends *any* trial once its
+  validation metric saturates. `batch_size` is a fixed per-dataset power of 2, not
+  searched (see § Search spaces). Set a wall-clock ceiling per search and stop if exceeded.
+- **Always off-limits** (every phase): the **canonical-sort premise**
+  (`utils/_utils.py`); the **shared model interface**
+  `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()`; **dataset
+  splits/preprocessing**; **baseline model code**.
+- **LDNA internal architecture** is off-limits **during tuning**, but IS in-scope as
+  an **escalation** step once tuning cannot reach top-2 on a dataset — see
+  § Escalation for the levers and invariants.
 - **Implementing** new datasets, baselines, or node-level task support IS a sanctioned
   code change (distinct from tuning-time edits) — but keep the shared model interface
   and the canonical-sort design intact, and prefer minimal diffs.
 - GPU etiquette above is a hard rule: never preempt another user's GPU.
-- Stop-and-report conditions: TODO (e.g. target ranking reached on a dataset; no
-  improvement over N trials; budget exhausted; unexpected failure).
+- Stop-and-report conditions (any one triggers stop + report):
+  1. **Target reached** — LDNA is top-2 on the dataset (ideally #1 with a non-trivial
+     SEM margin per § Objective).
+  2. **Search stalled** — Optuna best value not improved for ~15–20 trials.
+  3. **Escalation exhausted** — 3 consecutive LDNA architecture changes still fail to
+     reach top-2 (see § Escalation).
+  4. **Budget exhausted** — trial or wall-clock ceiling hit.
+  5. **Failure** — OOM / NaN / divergence.
 
 ---
 
@@ -162,11 +290,20 @@ Mirror of `AGENTS.md` (§ Autonomous optimization); concrete limits here.
 Code to write, ordered easiest-first (graph-level reuses the existing pipeline;
 node-level needs new infrastructure; expressiveness needs custom evaluation).
 
-- [ ] Run GraphSAGE on existing datasets (no new code; configs exist).
-- [ ] Tune LDNA + run all baselines on `ogbg-molpcba` (code done; needs tuning + runs).
-- [ ] Implement `GNN-VPA` baseline wrapper in `models/` (available to all datasets).
-- [ ] Add `ogbg-ppa` (graph-level; constant/degree node features; OGB evaluator).
-- [ ] Add `ogbg-code2` (graph-level; confirm target head + F1 evaluator).
+**Graph-level (do these first, in order):**
+
+- [ ] Implement `GNN-VPA` baseline wrapper in `models/` (shared
+      `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface; available to all datasets).
+- [ ] Add `ogbg-ppa` to the pipeline (graph-level; constant/degree node features; OGB evaluator).
+- [ ] Add `ogbg-code2` to the pipeline (graph-level; confirm target head + F1 evaluator).
+- [ ] Extend `hyperparam_search.py` to **all** graph-level datasets — it currently supports
+      only `ogbg-molhiv` / `ogbg-molpcba` / `ZINC`; add `MNISTSuperpixels`, `ogbg-ppa`,
+      `ogbg-code2` (per-dataset evaluator, direction, loss, batch_size).
+- [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every
+      graph-level dataset — do this after GNN-VPA and the items above are in place.
+
+**Node-level (needs new infrastructure):**
+
 - [ ] **Node-level infrastructure**: resolver branches for node datasets; a node-mode
       LDNA/baseline path (no graph pooling — per-node prediction head); transductive
       training loop with train/val/test masks; neighbor sampling for large graphs.
@@ -174,18 +311,37 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 - [ ] Add `Reddit` (neighbor sampling).
 - [ ] Add `ogbn-products` (neighbor sampling; OGB evaluator).
 - [ ] Add `ogbn-proteins` (edge-feature aggregation to nodes; ROC-AUC).
+
+**Expressiveness (custom evaluation):**
+
 - [ ] Add `EXP` / `CEXP` (port dataset + splits; accuracy).
 - [ ] Add `BREC` (dataset + BREC pairwise-distinguishing evaluation).
-- [ ] Extend `hyperparam_search.py` to every dataset above as its pipeline lands.
+- [ ] Extend `hyperparam_search.py` and the experiment protocol to node-level and
+      expressiveness datasets as their pipelines land.
 
 ---
 
 ## Experiment queue
 
 Runs to do once the code is in place. Keep status current; move finished items to
-the results log. (Populate as implementation lands.)
+the results log.
 
-- [ ] TODO
+**Graph-level protocol.** For **each** dataset in § Datasets → Graph-level prediction,
+run these steps independently — **do not reuse any past hyperparameters** (they are
+invalid after the architecture change):
+
+1. **Tune LDNA from scratch** on the dataset with `hyperparam_search.py`.
+2. **Broadcast** the tuned shared config verbatim to **all** baselines — GCN, GIN, GINE,
+   GraphSAGE, GAT, GATv2, PNA, EGC, DeeperGCN, GNN-VPA (§ Tuning methodology).
+3. **Run** LDNA + all baselines on the dataset with `train.py` (multi-run).
+4. **Rank** LDNA vs. baselines by the § Objective margin and append to § Results log.
+
+- [ ] `ogbg-molhiv`
+- [ ] `ogbg-molpcba`
+- [ ] `ZINC`
+- [ ] `MNISTSuperpixels`
+- [ ] `ogbg-ppa` (after its pipeline + search support land)
+- [ ] `ogbg-code2` (after its pipeline + search support land)
 
 ---
 
