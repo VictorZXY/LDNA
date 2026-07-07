@@ -48,8 +48,10 @@
   `ZINC`, `ogbg-molpcba`, `MNISTSuperpixels`, one per GPU. GPU policy: prefer idle, keep
   all 4 busy, share freely, never OOM anyone (see `.claude/experiments.md`).
 - Graph-level scope fixed to those four datasets **plus `ogbg-code2`** (edge-less / GIN
-  family, dedicated sequence-prediction path — seq-head + F1 eval + vocab pre-pass;
-  in progress). **`ogbg-ppa` dropped**: featureless nodes make the feature-based canonical
+  family, dedicated sequence-prediction path — `ASTNodeEncoder` + `Code2Model` seq-head +
+  per-position CE loss + decode→F1 eval + train-split vocab pre-pass; **implemented & merged
+  `aade777`**, `train.py`/`hyperparam_search.py` use a guarded `if is_code2` fork so the other
+  datasets' loops are unchanged). **`ogbg-ppa` dropped**: featureless nodes make the feature-based canonical
   sort non-permutation-invariant, which LDNA requires (the sort is a correctness requirement,
   not a performance lever — LDNA's gain is the MLP aggregator).
 

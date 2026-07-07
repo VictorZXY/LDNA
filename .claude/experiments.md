@@ -48,7 +48,7 @@ exists but not tuned/run; `todo` = not implemented.
 | `ogbg-molpcba` | multi-task binary (128) | AP | max | `OGBGraphPropPredEvaluator` | partial | code + configs exist; not tuned/run |
 | `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired + configs; search uses `subset=True` (~10k), final training uses full ZINC; **re-run needed** |
 | `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired + configs; not in `hyperparam_search.py` yet; **re-run needed** |
-| `ogbg-code2` | AST subtoken prediction | F1 | max | `Code2Evaluator` (OGB F1) | todo | **edge-less** (GIN family, no `edge_attr`); needs dedicated seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass; skip lexsort (AST DFS order is canonical) |
+| `ogbg-code2` | AST subtoken prediction | F1 | max | `Code2Evaluator` (OGB F1) | done | **edge-less** (GIN family, no `edge_attr`); dedicated seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass; skip lexsort (AST DFS order is canonical). `num_nodetypes=98`, `num_nodeattributes=10030` |
 
 > **`ogbg-ppa` removed from scope** (2026-07-07): ppa has no node features, so the feature-based
 > canonical sort cannot impose a **permutation-invariant** node order (identical features → the
@@ -313,12 +313,13 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 - [x] Implement `GNN-VPA` baseline wrapper in `models/` (`models/vpa.py`; shared
       `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface; available to all datasets).
-- [ ] Add `ogbg-code2` to the pipeline (graph-level; **edge-less/GIN**, no `edge_attr`): dedicated
+- [x] Add `ogbg-code2` to the pipeline (graph-level; **edge-less/GIN**, no `edge_attr`): dedicated
       seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass +
-      `ASTNodeEncoder` (type/attr/depth); **skip lexsort** (AST DFS order). Touches `train.py`.
-- [~] Extend `hyperparam_search.py` to all graph-level datasets — `MNISTSuperpixels` **done**
-      (search also arch-aligned to `readout: attention` + `residual: true`); still add `ogbg-code2`
-      (F1 evaluator, maximize, code2 loss/eval loop, batch_size).
+      `ASTNodeEncoder` (type/attr/depth); **skip lexsort** (AST DFS order). Merged `aade777`
+      (`utils/code2.py`, `models/{ast_encoder,code2_head}.py`, guarded `train.py`/`hyperparam_search.py` fork).
+- [x] Extend `hyperparam_search.py` to all graph-level datasets — `MNISTSuperpixels` **done**
+      (search also arch-aligned to `readout: attention` + `residual: true`); `ogbg-code2` **done**
+      (F1 evaluator, maximize, code2 loss/eval loop, batch_size 128).
 - [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every
       graph-level dataset — do this after GNN-VPA and the items above are in place.
 
