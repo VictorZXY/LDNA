@@ -203,7 +203,7 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 ## References
 
 - OGB: https://ogb.stanford.edu
-- torch_geometric: https://pytorch-geometric.readthedocs.io/en/latest/
+- PyTorch Geometric: https://pytorch-geometric.readthedocs.io/en/stable/
 - EXP / CEXP (GNN-RNI): https://arxiv.org/pdf/2010.01179 · https://github.com/ralphabb/GNN-RNI
 - BREC: https://arxiv.org/pdf/2304.07702 · https://github.com/GraphPKU/BREC
 - GNN-VPA: https://arxiv.org/abs/2403.04747 · https://github.com/ml-jku/GNN-VPA
