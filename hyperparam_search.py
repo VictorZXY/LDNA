@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from utils import evaluator_resolver, loss_resolver, model_and_data_resolver, tee_to_file
+from utils.evaluator import Code2Evaluator
 
 
 def _get_study_settings(dataset: str) -> dict:
@@ -30,6 +31,11 @@ def _get_study_settings(dataset: str) -> dict:
         return {
             'direction': 'maximize',
             'best_value_label': 'Best Validation Accuracy',
+        }
+    elif dataset == 'ogbg-code2':
+        return {
+            'direction': 'maximize',
+            'best_value_label': 'Best Validation F1',
         }
 
     raise ValueError(f"Unsupported dataset '{dataset}'")
@@ -104,6 +110,23 @@ def _get_training_config(
             'evaluator_kwargs': {},
             'scheduler_mode': 'max',
         }
+    elif dataset == 'ogbg-code2':
+        # Edge-less sequence task: loss/evaluator are handled by the code2 fork in train_LDNA
+        # (per-position CE + the OGB F1 evaluator built from the model's idx2vocab), so
+        # `loss_query` is None here.
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/',
+                'batch_size': batch_size,
+            },
+            'loss_query': None,
+            'evaluator_query': 'Code2Evaluator',
+            'evaluator_kwargs': {
+                'name': 'ogbg-code2',
+            },
+            'scheduler_mode': 'max',
+        }
 
     raise ValueError(f"Unsupported dataset '{dataset}'")
 
@@ -123,6 +146,14 @@ def train_LDNA(
         device='cuda:0',
         mem_fraction: float = 0.30,
 ):
+    # ogbg-code2 uses a sequence head (per-position CE loss + F1 eval); the code2 fork mirrors this
+    # function, and everything below is left unchanged for all single-target datasets.
+    if dataset == 'ogbg-code2':
+        return _train_LDNA_code2(
+            trial, dataset, hidden_channels, num_layers, dropout, batch_size, lr,
+            weight_decay, epochs, patience, min_delta, device, mem_fraction,
+        )
+
     # ---- Load device ----
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
 
@@ -220,6 +251,107 @@ def train_LDNA(
     return median(all_results[-5:])
 
 
+def _train_LDNA_code2(
+        trial,
+        dataset: str,
+        hidden_channels: int,
+        num_layers: int,
+        dropout: float,
+        batch_size: int,
+        lr: float,
+        weight_decay: float,
+        epochs: int,
+        patience: int,
+        min_delta: float,
+        device,
+        mem_fraction: float,
+):
+    # ---- Load device ----
+    device = torch.device(device if torch.cuda.is_available() else 'cpu')
+
+    if device.type == 'cuda':
+        torch.cuda.set_per_process_memory_fraction(mem_fraction, device.index)
+        torch.cuda.empty_cache()
+
+    # ---- Load data ----
+    config = _get_training_config(
+        dataset=dataset,
+        batch_size=batch_size,
+        hidden_channels=hidden_channels,
+        num_layers=num_layers,
+        dropout=dropout,
+    )
+
+    # ---- Instantiate model ----
+    model, train_loader, val_loader, _ = model_and_data_resolver(
+        'LDNA',
+        dataset,
+        model_args=config['model_args'],
+        data_args=config['data_args'],
+    )
+    # code2: per-position CE loss and the OGB F1 evaluator built from the model's vocabulary.
+    criterion = nn.CrossEntropyLoss()
+    evaluator = Code2Evaluator(name='ogbg-code2', idx2vocab=model.idx2vocab)
+
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode=config['scheduler_mode'])
+
+    all_results = []
+    mode = config['scheduler_mode']
+    best_metric = None
+    epochs_no_improve = 0
+
+    for epoch in range(epochs):
+        # ---- Training ----
+        model.train()
+
+        for batch in train_loader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+            pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+            loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
+                       for i in range(len(pred_list))) / len(pred_list)
+            loss.backward()
+            optimizer.step()
+
+        # ---- Validation ----
+        model.eval()
+        seq_ref = []
+        seq_pred = []
+        with torch.no_grad():
+            for batch in val_loader:
+                batch = batch.to(device)
+                pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+                mat = torch.stack([p.argmax(dim=1) for p in pred_list], dim=1)
+                seq_pred.extend(evaluator.decode(mat))
+                seq_ref.extend([batch.y[i] for i in range(len(batch.y))])
+
+        result = evaluator.eval(seq_ref, seq_pred)[evaluator.eval_metric]
+        all_results.append(result)
+        scheduler.step(result)
+
+        # ---- Pruning ----
+        trial.report(result, step=epoch)
+        if trial.should_prune():
+            raise optuna.TrialPruned()
+
+        # ---- Early stopping: stop once the validation metric has saturated ----
+        if best_metric is None or (result > best_metric + min_delta if mode == 'max'
+                                   else result < best_metric - min_delta):
+            best_metric = result
+            epochs_no_improve = 0
+        else:
+            epochs_no_improve += 1
+        if epochs_no_improve >= patience:
+            break
+
+    if epochs < 5:
+        return median(all_results)
+
+    return median(all_results[-5:])
+
+
 def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
               min_delta: float = 1e-3, device: str = 'cuda:0',
               mem_fraction: float = 0.30) -> float:
@@ -229,7 +361,8 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     dropout = trial.suggest_float('dropout', 0.0, 0.7)
     # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
     # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
-    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256}[dataset]
+    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256,
+                  'ogbg-code2': 128}[dataset]
     lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
 
@@ -293,7 +426,9 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels'], required=True)
+    parser.add_argument('--dataset',
+                        choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels', 'ogbg-code2'],
+                        required=True)
     parser.add_argument('--device', default='cuda:0')
     # Cap on this process's share of the (shared) GPU. Lower it on cards with an extra
     # co-tenant so a large sampled model can't OOM another user's job (see § GPU policy).

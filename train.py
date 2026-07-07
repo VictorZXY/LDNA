@@ -11,6 +11,7 @@ from torch import nn
 from torch_geometric.nn.resolver import optimizer_resolver, lr_scheduler_resolver
 
 from utils import Logger, evaluator_resolver, loss_resolver, model_and_data_resolver, tee_to_file
+from utils.evaluator import Code2Evaluator
 
 
 @torch.no_grad()
@@ -45,6 +46,11 @@ def evaluate(model, loader, evaluator, loss_fn, device):
 
 
 def train(model, train_loader, val_loader, test_loader, train_args, device):
+    # ogbg-code2 uses a sequence head (per-position CE loss + F1 eval); everything below is the
+    # standard single-target path and is left unchanged for all other datasets.
+    if hasattr(model, 'idx2vocab'):
+        return _train_code2(model, train_loader, val_loader, test_loader, train_args, device)
+
     model = model.to(device)
     print(f"# Params: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
@@ -87,6 +93,89 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
             train_result_dict = evaluate(model, train_loader, evaluator, loss_fn, device)
             val_result_dict = evaluate(model, val_loader, evaluator, loss_fn, device)
             test_result_dict = evaluate(model, test_loader, evaluator, loss_fn, device)
+            logger.add_result(run, train_result_dict[eval_metric],
+                              val_result_dict[eval_metric],
+                              test_result_dict[eval_metric])
+            scheduler.step(val_result_dict[eval_metric])
+
+            if (epoch + 1) % train_args['eval_interval'] == 0:
+                print(f"Run {(run + 1):02d}, "
+                      f"Epoch {(epoch + 1):3d}/{train_args['epochs']:3d}, "
+                      f"Train loss: {train_result_dict['loss']:.4f}, "
+                      f"Val loss: {val_result_dict['loss']:.4f}, "
+                      f"Train {eval_metric}: {train_result_dict[eval_metric]:.4f}, "
+                      f"Val {eval_metric}: {val_result_dict[eval_metric]:.4f}, "
+                      f"Test {eval_metric}: {test_result_dict[eval_metric]:.4f}")
+
+        end_time = time.time()
+        run_times.append(end_time - start_time)
+        logger.print_statistics(run)
+
+    return model, logger, run_times
+
+
+@torch.no_grad()
+def _evaluate_code2(model, loader, evaluator, criterion, device):
+    model.eval()
+
+    seq_ref = []
+    seq_pred = []
+    total_loss = 0
+    for batch in loader:
+        batch = batch.to(device)
+        pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+
+        loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
+                   for i in range(len(pred_list))) / len(pred_list)
+        total_loss += loss.detach().item()
+
+        mat = torch.stack([p.argmax(dim=1) for p in pred_list], dim=1)
+        seq_pred.extend(evaluator.decode(mat))
+        seq_ref.extend([batch.y[i] for i in range(len(batch.y))])
+
+    result_dict = {evaluator.eval_metric: evaluator.eval(seq_ref, seq_pred)[evaluator.eval_metric]}
+    result_dict['loss'] = total_loss / len(loader)
+
+    return result_dict
+
+
+def _train_code2(model, train_loader, val_loader, test_loader, train_args, device):
+    model = model.to(device)
+    print(f"# Params: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
+    evaluator = Code2Evaluator(name='ogbg-code2', idx2vocab=model.idx2vocab)
+    criterion = nn.CrossEntropyLoss()
+    eval_metric = evaluator.eval_metric
+
+    logger = Logger(train_args['runs'], eval_metric)
+    run_times = []
+
+    for run in range(train_args['runs']):
+        start_time = time.time()
+        model.reset_parameters()
+
+        optimizer_kwargs = train_args['optimizer_kwargs'] if 'optimizer_kwargs' in train_args else {}
+        optimizer = optimizer_resolver(train_args['optimizer'], model.parameters(), **optimizer_kwargs)
+        scheduler_kwargs = train_args['scheduler_kwargs'] if 'scheduler_kwargs' in train_args else {}
+        scheduler = lr_scheduler_resolver(train_args['scheduler'], optimizer, **scheduler_kwargs)
+
+        for epoch in range(train_args['epochs']):
+            model.train()
+
+            total_loss = 0
+            for batch in train_loader:
+                batch = batch.to(device)
+                optimizer.zero_grad()
+                pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+                loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
+                           for i in range(len(pred_list))) / len(pred_list)
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.detach().item()
+
+            train_result_dict = _evaluate_code2(model, train_loader, evaluator, criterion, device)
+            val_result_dict = _evaluate_code2(model, val_loader, evaluator, criterion, device)
+            test_result_dict = _evaluate_code2(model, test_loader, evaluator, criterion, device)
             logger.add_result(run, train_result_dict[eval_metric],
                               val_result_dict[eval_metric],
                               test_result_dict[eval_metric])
