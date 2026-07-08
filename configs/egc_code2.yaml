@@ -1,0 +1,41 @@
+experiment_name: egc_code2
+
+# Model specific arguments/hyperparameters
+model: EGC
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 4
+  use_multi_aggregators: True
+  dropout: 0.05
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ogbg-code2
+data_args:
+  root: data/
+  batch_size: 128
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  # loss_fn is handled by the code2 fork in train.py (per-position CrossEntropyLoss);
+  # this marker is unused for ogbg-code2.
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 6.5e-5
+    weight_decay: 3.0e-4
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: Code2Evaluator
+  evaluator_kwargs:
+    name: ogbg-code2
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
