@@ -231,6 +231,7 @@ def main(args):
             print(f"Average run time: {avg_run_time:.3f} seconds")
 
         if args.checkpoint_dir is not None:
+            os.makedirs(args.checkpoint_dir, exist_ok=True)
             torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f'{args.experiment_name}.pt'))
         if args.log_dir is not None:
             with open(os.path.join(args.log_dir, f'{args.experiment_name}_logger.pickle'), 'wb') as f:
