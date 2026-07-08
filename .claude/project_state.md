@@ -23,9 +23,11 @@
   learnable projection covers any `out_channels ≠ hidden_channels`). All configs set
   `readout: attention` + `residual: true`.
 - Both `train.py` and `hyperparam_search.py` tee each run under `out/logs/` (`utils/tee.py`)
-  and cap per-process GPU share via `--mem_fraction`; the search is OOM-tolerant on shared
-  cards (`empty_cache` between trials, `study.optimize(catch=(RuntimeError,))`). All outputs
-  (logs + checkpoints) live under `out/`.
+  and expose an optional `--mem_fraction` per-process GPU cap; the search is OOM-tolerant on
+  shared cards (`empty_cache` between trials, `study.optimize(catch=(RuntimeError,))`). Per the
+  user (2026-07-08), a search that owns its card runs **uncapped** (`--mem_fraction 1.0`) — a
+  cap silently OOM-drops large-hidden trials and biases the search; cap only when co-locating
+  jobs on one card. All outputs (logs + checkpoints) live under `out/`.
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
   and `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
   `VariancePreservingAggregation`, `sum/√N`). `GIN` xor `GINE` runs per dataset by edge

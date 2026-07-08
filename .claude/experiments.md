@@ -280,6 +280,13 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
     searches OOM-tolerant (`study.optimize(catch=(RuntimeError,))`), and watch per-card
     free memory (a safety monitor alerts if any card's free VRAM drops into the danger
     zone). If a card gets tight, back our jobs off rather than risk a collision.
+  - **`--mem_fraction` policy (user, 2026-07-08): do NOT cap a search that owns its card.**
+    `hyperparam_search.py --mem_fraction` calls `set_per_process_memory_fraction`, a **hard**
+    per-process cap: a large sampled config (hidden 1024 × layers 8) that exceeds it OOMs, is
+    swallowed by `catch=(RuntimeError,)`, and is **silently dropped** — biasing the search away
+    from big models. So run **one uncapped job per dedicated card** (`--mem_fraction 1.0`); it
+    uses only what it needs. Re-introduce a fraction **only** when co-locating multiple jobs on
+    one card, and even then watch `nvidia-smi` so a big config can't OOM a co-tenant.
 - Scaling is done **through configs only** — no code changes needed to parallelize.
 - **Second machine (`ee-tiamat`, H100 NVL 95GB).** A remote H100 is available for the
   heaviest datasets (`ogbg-molpcba`, `ogbg-code2`). Drive it via `ssh ee-tiamat`; the repo
