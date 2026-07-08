@@ -8,49 +8,38 @@
 ---
 
 ## Current progress
-- Main training pipeline is present in `train.py`.
-- YAML experiment configs are present in `configs/`.
-- LDNA model implementation is present in `models/ldna_conv.py` and `models/ldna_net.py`.
-- Baseline GNN model wrappers are present in `models/`.
-- Dataset preprocessing, sorting, evaluators, logger, and resolver code are present in `utils/`.
-- A generic Optuna search script (`hyperparam_search.py`) supports all five graph-level
-  datasets (ogbg-molhiv, ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2). `MedianPruner`
-  is enabled and search trials early-stop on plateau (`patience=20`, `min_delta=1e-3`); the
-  search uses a low epoch cap of 50 while final training runs the full 150. `n_trials`
-  defaults to 100, and `batch_size` is a fixed per-dataset power of 2. All training loops
-  clip gradients to `max_norm=1.0`. Search ranges and rationale live in
-  `.claude/experiments.md` (§ Search spaces).
-- `readout` (now incl. `attention` = `AttentionalAggregation`) and an optional per-layer
-  `residual` flag are shared, config-selectable knobs supported by every model family
-  (LDNA + all baselines); `DeeperGCN` keeps its intrinsic `res+` and ignores the flag.
-  The resolver maps every model's encoder to the model width
-  (`embedding_dim = hidden_channels`, previously `128` for non-DeeperGCN), so the conv
-  stack is uniform and residual skips are identity (a learnable linear projection is kept
-  as a safety net for `out_channels ≠ hidden_channels`). All current configs set
+- The repository is a usable experiment runner (not a packaged project): `train.py`
+  (training loop), `configs/` (YAML experiments), `models/` (LDNA — `ldna_conv.py` /
+  `ldna_net.py` — plus the baseline wrappers), `utils/` (dataset loading/sorting, resolver,
+  evaluators, logger), and `requirements.txt`. Current contents are graph-level only.
+- `hyperparam_search.py` tunes LDNA on all five graph-level datasets (ogbg-molhiv,
+  ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2). Search mechanics — ranges, pruning,
+  plateau early-stopping, the 50-epoch search cap (vs 150 final), and gradient clipping —
+  live in `.claude/experiments.md` (§ Search spaces).
+- `readout` (incl. `attention` = `AttentionalAggregation`) and a per-layer `residual` flag
+  are shared knobs supported by every model family; `DeeperGCN` keeps its intrinsic `res+`
+  and ignores the flag. The resolver unifies every model's encoder width to
+  `hidden_channels`, so the conv stack is uniform and residual skips are identities (a
+  learnable projection covers any `out_channels ≠ hidden_channels`). All configs set
   `readout: attention` + `residual: true`.
-- `train.py` and `hyperparam_search.py` tee stdout/stderr to a per-run `logs/<name>.txt`
-  via `utils/tee.py` (`Tee` / `tee_to_file`), and cap each process's GPU share via
-  `--mem_fraction` (`set_per_process_memory_fraction`) so a co-located job cannot OOM.
-  The search is also hardened for shared-GPU co-tenancy (`empty_cache` between trials,
-  `study.optimize(catch=(RuntimeError,))` so an OOM trial is skipped, not fatal).
-- Python dependencies are listed in `requirements.txt`. The repository is usable as an
-  experiment runner; it is not documented as a packaged project. Current contents are
-  centered on graph-level experiments.
-- `GNN-VPA` baseline added (`models/vpa.py`, class `VPA`): GIN/GINE backbone with the PyG
-  built-in `VariancePreservingAggregation` (`sum/√N`) injected via `aggr=`; dual-path
-  (edge datasets → `GINEConv`, edge-less → `GINConv`); shared interface; resolver query
-  `GNN-VPA`.
+- Both `train.py` and `hyperparam_search.py` tee each run under `out/logs/` (`utils/tee.py`)
+  and cap per-process GPU share via `--mem_fraction`; the search is OOM-tolerant on shared
+  cards (`empty_cache` between trials, `study.optimize(catch=(RuntimeError,))`). All outputs
+  (logs + checkpoints) live under `out/`.
+- Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
+  and `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
+  `VariancePreservingAggregation`, `sum/√N`). `GIN` xor `GINE` runs per dataset by edge
+  availability (see `.claude/experiments.md` § Baselines).
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
-  sequence-prediction path — `ASTNodeEncoder` (type/attr/depth) + `Code2Head` seq-head +
-  per-position CE loss + decode→F1 eval + train-split vocab pre-pass; the feature lexsort
-  is skipped (AST DFS order is already canonical). `train.py` / `hyperparam_search.py` use
-  a guarded fork so the other datasets' loops are unchanged. `ogbg-ppa` is out of scope:
-  featureless nodes make the feature-based canonical sort non-permutation-invariant, which
-  LDNA requires (the sort is a correctness requirement, not a performance lever — LDNA's
-  gain is the MLP aggregator).
-- Two torch≥2.6 / PyG 2.7 compatibility fixes are in place (needed to load MNIST/ZINC/OGB):
+  sequence-prediction path — `ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a
+  guarded fork in `train.py` / `hyperparam_search.py` (per-position CE loss, decode→F1
+  eval, train-split vocab pre-pass); the feature lexsort is skipped because the AST DFS
+  order is already canonical. `ogbg-ppa` is out of scope: its featureless nodes make the
+  feature-based sort non-permutation-invariant, which LDNA's MLP aggregator requires (the
+  sort is a correctness requirement, not a performance lever).
+- Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
-  `weights_only=False` shim.
+  `weights_only=False`.
 
 ---
 
