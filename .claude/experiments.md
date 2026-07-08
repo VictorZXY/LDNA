@@ -332,7 +332,7 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 **Graph-level (do these first, in order):**
 
 - [x] Graph-level pipeline infrastructure complete — `GNN-VPA` baseline (`models/vpa.py`),
-      the `ogbg-code2` edge-less pipeline (`utils/code2.py`, `models/{ast_encoder,code2_head}.py`,
+      the `ogbg-code2` edge-less pipeline (`utils/code2.py`, `models/code2.py`,
       guarded `train.py`/`hyperparam_search.py` fork), and `hyperparam_search.py` extended to all
       five graph-level datasets. Details in `.claude/project_state.md` § Current progress.
 - [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every

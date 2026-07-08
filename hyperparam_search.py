@@ -440,6 +440,6 @@ if __name__ == '__main__':
     parser.add_argument('--min_delta', type=float, default=1e-3)
     parser.add_argument('--n_trials', type=int, default=100)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--log_dir', type=str, default='logs/')
+    parser.add_argument('--log_dir', type=str, default='out/logs/')
 
     main(parser.parse_args())

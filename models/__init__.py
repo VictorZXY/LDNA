@@ -11,8 +11,7 @@ from .gine import GINE
 from .pna import PNA
 from .sage import GraphSAGE
 from .vpa import VPA
-from .ast_encoder import ASTNodeEncoder
-from .code2_head import Code2Model
+from .code2 import ASTNodeEncoder, Code2Model
 
 __all__ = [
     'DeeperGCN',

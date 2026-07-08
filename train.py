@@ -255,8 +255,8 @@ if __name__ == '__main__':
     parser.add_argument('--mem_fraction', default=0.30, type=float)
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--train_args', default=None, type=yaml.safe_load)
-    parser.add_argument('--checkpoint_dir', default='checkpoints/', type=str)
-    parser.add_argument('--log_dir', default='logs/', type=str)
+    parser.add_argument('--checkpoint_dir', default='out/checkpoints/', type=str)
+    parser.add_argument('--log_dir', default='out/logs/', type=str)
 
     args = parser.parse_args()
     torch_geometric.seed_everything(args.seed)

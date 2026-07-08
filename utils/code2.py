@@ -7,7 +7,7 @@
 # fixed-length index array (``data.y_arr``) for the per-position classifier head, and turn a
 # predicted index array back into a token sequence for the OGB F1 evaluator. The AST node
 # encoder and edge-augmentation helpers from that same file are intentionally NOT ported: the
-# LDNA code2 pipeline is edge-less and uses a 1-argument encoder (models/ast_encoder.py).
+# LDNA code2 pipeline is edge-less and uses a 1-argument encoder (models/code2.py).
 import numpy as np
 import torch
 
