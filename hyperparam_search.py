@@ -208,6 +208,7 @@ def train_LDNA(
                 is_labelled = (batch.y == batch.y)
                 loss = loss_fn(out[is_labelled], batch.y[is_labelled].float())
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
         # ---- Validation ----
@@ -313,6 +314,7 @@ def _train_LDNA_code2(
             loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
                        for i in range(len(pred_list))) / len(pred_list)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
         # ---- Validation ----

@@ -87,6 +87,7 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
                     is_labelled = (batch.y == batch.y)
                     loss = loss_fn(out[is_labelled], batch.y[is_labelled].float())
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 total_loss += loss.detach().item()
 
@@ -170,6 +171,7 @@ def _train_code2(model, train_loader, val_loader, test_loader, train_args, devic
                 loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
                            for i in range(len(pred_list))) / len(pred_list)
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 total_loss += loss.detach().item()
 
