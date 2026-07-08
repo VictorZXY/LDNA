@@ -44,10 +44,10 @@ exists but not tuned/run; `todo` = not implemented.
 
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
-| `ogbg-molhiv` | binary classification | ROC-AUC | max | `OGBGraphPropPredEvaluator` | done | wired + configs; **re-run needed** (see note) |
-| `ogbg-molpcba` | multi-task binary (128) | AP | max | `OGBGraphPropPredEvaluator` | partial | code + configs exist; not tuned/run |
-| `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired + configs; search uses `subset=True` (~10k), final training uses full ZINC; **re-run needed** |
-| `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired + configs; not in `hyperparam_search.py` yet; **re-run needed** |
+| `ogbg-molhiv` | binary classification | ROC-AUC | max | `OGBGraphPropPredEvaluator` | done | wired; configs; high run-to-run variance — use more runs (e.g. 10) |
+| `ogbg-molpcba` | multi-task binary (128) | AP | max | `OGBGraphPropPredEvaluator` | done | wired; configs; largest (350k graphs) — search capped, ranking full (see § Experiment queue) |
+| `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired; configs; search uses `subset=True` (~10k), final training uses full ZINC |
+| `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired; configs |
 | `ogbg-code2` | AST subtoken prediction | F1 | max | `Code2Evaluator` (OGB F1) | done | **edge-less** (GIN family, no `edge_attr`); dedicated seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass; skip lexsort (AST DFS order is canonical). `num_nodetypes=98`, `num_nodeattributes=10030` |
 
 > **`ogbg-ppa` removed from scope** (2026-07-07): ppa has no node features, so the feature-based
@@ -58,11 +58,6 @@ exists but not tuned/run; `todo` = not implemented.
 > not worth it given the four graph-level datasets already cover binary / multi-task / regression /
 > multi-class. `ogbg-code2` is kept: its AST nodes have a natural DFS order (permutation invariant),
 > so LDNA works there by using that order directly (skip the feature lexsort).
-
-> **Prior graph-level results are invalidated** by the recent shared architecture change
-> (`readout: attention` + `residual` + unified encoder width). Every wired graph-level
-> dataset (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`) must be **(re-)run**
-> under the current architecture; treat any earlier numbers as stale.
 
 ### 2. Node-level prediction
 
@@ -92,9 +87,16 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 
 | Model | Status | Notes |
 |---|---|---|
-| `GCN`, `GIN`, `GINE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` |
-| `GraphSAGE` | partial | code exists (`models/sage.py`), configs exist; not run yet |
+| `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` (`GraphSAGE` = `models/sage.py`, resolver query `GraphSAGE`/`SAGE`) |
 | `GNN-VPA` | done | `models/vpa.py` (`VPA`): GIN/GINE backbone with PyG built-in `VariancePreservingAggregation` (`sum/√N`) via `aggr=`; dual-path (edge datasets→GINEConv, edge-less→GINConv); shared interface. Resolver query `GNN-VPA` |
+
+> **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
+> runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
+> `edge_attr`). The rule is realized by the **config inventory**: each dataset ships only
+> `gine_<suffix>.yaml` (edge) *or* `gin_<suffix>.yaml` (edge-less), never both — currently
+> `gine_{hiv,molpcba,zinc}` and `gin_mnist` (code2 → `gin`). `broadcast.py` globs
+> `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
+> selects the matching GINE/GIN template for the `GNN-VPA` config the same way.
 
 ---
 
@@ -329,17 +331,12 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 **Graph-level (do these first, in order):**
 
-- [x] Implement `GNN-VPA` baseline wrapper in `models/` (`models/vpa.py`; shared
-      `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()` interface; available to all datasets).
-- [x] Add `ogbg-code2` to the pipeline (graph-level; **edge-less/GIN**, no `edge_attr`): dedicated
-      seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass +
-      `ASTNodeEncoder` (type/attr/depth); **skip lexsort** (AST DFS order). Merged `aade777`
-      (`utils/code2.py`, `models/{ast_encoder,code2_head}.py`, guarded `train.py`/`hyperparam_search.py` fork).
-- [x] Extend `hyperparam_search.py` to all graph-level datasets — `MNISTSuperpixels` **done**
-      (search also arch-aligned to `readout: attention` + `residual: true`); `ogbg-code2` **done**
-      (F1 evaluator, maximize, code2 loss/eval loop, batch_size 128).
+- [x] Graph-level pipeline infrastructure complete — `GNN-VPA` baseline (`models/vpa.py`),
+      the `ogbg-code2` edge-less pipeline (`utils/code2.py`, `models/{ast_encoder,code2_head}.py`,
+      guarded `train.py`/`hyperparam_search.py` fork), and `hyperparam_search.py` extended to all
+      five graph-level datasets. Details in `.claude/project_state.md` § Current progress.
 - [ ] **Run the graph-level experiment protocol** (see § Experiment queue) on every
-      graph-level dataset — do this after GNN-VPA and the items above are in place.
+      graph-level dataset.
 
 **Node-level (needs new infrastructure):**
 
