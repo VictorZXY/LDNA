@@ -359,7 +359,7 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
               mem_fraction: float = 0.30) -> float:
     # --- Search spaces for the hyperparameters ---
     hidden_channels = trial.suggest_categorical('hidden_channels', [128, 256, 512, 1024])
-    num_layers = trial.suggest_int('num_layers', 2, 10)
+    num_layers = trial.suggest_int('num_layers', 2, 8)
     dropout = trial.suggest_float('dropout', 0.0, 0.7)
     # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
     # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
