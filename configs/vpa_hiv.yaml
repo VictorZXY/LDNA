@@ -1,14 +1,15 @@
-experiment_name: deepergcn_softmax_hiv
+experiment_name: vpa_hiv
 
 # Model specific arguments/hyperparameters
-model: DeeperGCN
+model: GNN-VPA
 model_args:
   hidden_channels: 256
   out_channels: 256
   num_layers: 9
   num_trans_layers: 1
   num_pred_layers: 3
-  aggregator: softmax
+  eps: 0.0
+  train_eps: True
   dropout: 0.104699
   readout: attention
   residual: true
@@ -20,7 +21,7 @@ data_args:
   batch_size: 256
 
 # Training specific arguments/hyperparameters
-cuda: 1
+cuda: 2
 seed: 42
 train_args:
   runs: 5
