@@ -169,14 +169,14 @@ that still fail to reach top-2 — stop and report instead of looping.
 
 ## Search spaces
 
-Baseline search space currently in `hyperparam_search.py::objective` (LDNA only;
-`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`):
+LDNA search space in `hyperparam_search.py::objective` (all graph-level datasets —
+`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`):
 
 | Hyperparameter | Range / choices | Notes |
 |---|---|---|
 | `hidden_channels` | {128, 256, 512, 1024} | categorical |
-| `num_layers` | [2, 10] | int |
-| `dropout` | [0.0, 0.7] | float |
+| `num_layers` | [2, 8] | int (capped for stability — deep configs diverge sensitive baselines, see § stability below) |
+| `dropout` | [0.1, 0.7] | float (sub-0.1 dropout is not meaningful) |
 | `lr` | [1e-5, 1e-2] | log-uniform |
 | `weight_decay` | [1e-6, 1e-3] | log-uniform |
 | `batch_size` | not searched — per-dataset, power of 2 | implemented (see batch-size policy below) |
@@ -202,7 +202,7 @@ configs (final):
 **Epochs.** Final (ranking) runs all use the **same `epochs` (150)** — kept uniform so
 models are comparable. The search uses a much lower **cap of 50** to bound tuning time,
 plus **early stopping on plateau**: a trial ends once the validation metric has not
-improved by at least **`min_delta` (default `1e-3`)** for **`patience=10`** epochs. The
+improved by at least **`min_delta` (default `1e-3`)** for **`patience=20`** epochs. The
 `min_delta` guard is essential — without it, a slow monotonic climb of sub-noise upticks
 would reset the patience counter every epoch and the trial would run to the cap; with it,
 only improvements that clear `1e-3` over the running best reset the counter, so true
@@ -220,6 +220,18 @@ threshold suited to the AUC/AP/MAE scales; raise it if trials still run to the c
 complementary: pruning kills *bad* trials early relative to others; early stopping ends
 *any* trial once it saturates. Together, **`n_trials` defaults to 100** at roughly the
 wall-clock of 50 un-pruned full-length trials.
+
+**Gradient clipping & stability.** All training loops — search and final, in both
+`train.py` and `hyperparam_search.py` (including the `ogbg-code2` forks) — clip gradients
+to **`max_norm=1.0`** before `optimizer.step()`. This is a global stabilizer applied to
+every model. Even so, some baselines (notably **`EGC`**) diverge to NaN at **deep** configs
+(`num_layers ≳ 9`): the NaN originates in the forward/loss, so clipping — which only
+rescales *finite* gradients — cannot rescue it. Hence `num_layers` is capped at **8**, and
+`num_layers` is the primary instability driver (prefer the shallower of two otherwise
+comparable configs). If a baseline **still** diverges at LDNA's tuned shared config, that
+config is treated as **invalid** (§ Tuning methodology): re-tune, or fall back to the best
+config within the settled ranges that keeps every model finite. This keeps the shared-config
+comparison fair — a config that only LDNA can survive is not a valid basis for a ranking claim.
 
 Knobs not yet in the search space (candidates to add). Shared across all models (a
 searched value would apply to LDNA and every baseline): `readout`
@@ -267,6 +279,12 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
     free memory (a safety monitor alerts if any card's free VRAM drops into the danger
     zone). If a card gets tight, back our jobs off rather than risk a collision.
 - Scaling is done **through configs only** — no code changes needed to parallelize.
+- **Second machine (`ee-tiamat`, H100 NVL 95GB).** A remote H100 is available for the
+  heaviest datasets (`ogbg-molpcba`, `ogbg-code2`). Drive it via `ssh ee-tiamat`; the repo
+  (`~/Projects/LDNA`) and conda env (`LDNA`) mirror this host, and code syncs through GitHub
+  (push here → `git pull` there). Results (`out/logs/`, `logs/`) are gitignored, so copy them
+  back with `scp` and record numbers in § Results log here. Exact SSH/job commands are in
+  the two-machine setup memory (`.claude/project_state.md` § Next step has the summary).
 
 ---
 
