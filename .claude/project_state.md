@@ -41,7 +41,7 @@
   (edge datasets → `GINEConv`, edge-less → `GINConv`); shared interface; resolver query
   `GNN-VPA`.
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
-  sequence-prediction path — `ASTNodeEncoder` (type/attr/depth) + `Code2Model` seq-head +
+  sequence-prediction path — `ASTNodeEncoder` (type/attr/depth) + `Code2Head` seq-head +
   per-position CE loss + decode→F1 eval + train-split vocab pre-pass; the feature lexsort
   is skipped (AST DFS order is already canonical). `train.py` / `hyperparam_search.py` use
   a guarded fork so the other datasets' loops are unchanged. `ogbg-ppa` is out of scope:

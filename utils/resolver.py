@@ -123,7 +123,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         })
     elif dataset_query == 'ogbg-code2':
         # Edge-less: no edge_dim / edge_encoder. `num_pred_heads=None` makes the backbone return
-        # the pooled graph embedding, which the Code2Model wrapper turns into the sequence head.
+        # the pooled graph embedding, which the Code2Head wrapper turns into the sequence head.
         model_kwargs.update({
             'in_channels': embedding_dim,
             'node_encoder': models.ASTNodeEncoder(embedding_dim, num_nodetypes, num_nodeattributes, max_depth=20),
@@ -171,7 +171,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     # ogbg-code2: wrap any backbone with the per-position sequence head. The wrapper also carries
     # `idx2vocab`, which the training loop uses to detect the code2 task and decode predictions.
     if dataset_query == 'ogbg-code2':
-        model = models.Code2Model(model, emb_dim=embedding_dim, max_seq_len=5,
+        model = models.Code2Head(model, emb_dim=embedding_dim, max_seq_len=5,
                                   num_vocab=len(vocab2idx), idx2vocab=idx2vocab)
 
     return model, train_loader, val_loader, test_loader

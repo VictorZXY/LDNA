@@ -36,12 +36,12 @@ class ASTNodeEncoder(nn.Module):
         return self.type_encoder(x[:, 0]) + self.attribute_encoder(x[:, 1]) + self.depth_encoder(depth)
 
 
-class Code2Model(nn.Module):
+class Code2Head(nn.Module):
     '''
         Sequence-prediction wrapper for the ogbg-code2 task.
 
         Any backbone in this repo returns a pooled graph embedding when built with
-        ``num_pred_heads=None`` (see models/gin.py, models/ldna_net.py). Code2Model turns that
+        ``num_pred_heads=None`` (see models/gin.py, models/ldna_net.py). Code2Head turns that
         single embedding into ``max_seq_len`` independent per-position classifiers over the
         method-name vocabulary, so the backbones stay unchanged and dataset-specific logic lives
         here. It also carries ``idx2vocab`` so the training loop can detect the code2 task
