@@ -1,7 +1,7 @@
-experiment_name: gine_molpcba
+experiment_name: vpa_molpcba
 
 # Model specific arguments/hyperparameters
-model: GINE
+model: GNN-VPA
 model_args:
   hidden_channels: 1024
   out_channels: 1024

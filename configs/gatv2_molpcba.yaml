@@ -3,11 +3,11 @@ experiment_name: gatv2_molpcba
 # Model specific arguments/hyperparameters
 model: GATv2
 model_args:
-  hidden_channels: 256
-  out_channels: 256
-  num_layers: 4
+  hidden_channels: 1024
+  out_channels: 1024
+  num_layers: 7
   num_pred_layers: 3
-  dropout: 0.05
+  dropout: 0.103161
   readout: attention
   residual: true
 
@@ -21,14 +21,14 @@ data_args:
 cuda: 0
 seed: 42
 train_args:
-  runs: 5
+  runs: 3
   epochs: 150
   eval_interval: 10
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 6.5e-5
-    weight_decay: 3.0e-4
+    lr: 3.44116e-05
+    weight_decay: 4.39658e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max
