@@ -5,9 +5,9 @@ model: GraphSAGE
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 4
+  num_layers: 6
   num_pred_layers: 3
-  dropout: 0.05
+  dropout: 0.12787
   readout: attention
   residual: true
 
@@ -27,8 +27,8 @@ train_args:
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 6.5e-5
-    weight_decay: 3.0e-4
+    lr: 0.000664714
+    weight_decay: 3.24767e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

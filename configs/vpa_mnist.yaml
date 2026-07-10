@@ -1,14 +1,15 @@
-experiment_name: pna_mnist
+experiment_name: vpa_mnist
 
 # Model specific arguments/hyperparameters
-model: PNA
+model: GNN-VPA
 model_args:
   hidden_channels: 256
   out_channels: 256
   num_layers: 6
-  num_pre_layers: 1
-  num_post_layers: 1
+  num_trans_layers: 1
   num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
   dropout: 0.12787
   readout: attention
   residual: true
