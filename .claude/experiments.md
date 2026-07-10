@@ -401,7 +401,7 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 
 | Date | Dataset | Model | Config summary | Metric (val / test) | LDNA rank / margin | Notes |
 |---|---|---|---|---|---|---|
-| TODO | | | | | | |
+| 2026-07-10 | ogbg-molhiv | LDNA + 10 baselines | tuned h256/l6/do0.143/lr6.30e-5/wd4.52e-6, attention, residual, runs=10, 150ep | test ROC-AUC: LDNA 0.7867±0.0118 (SEM 0.0037) | **#2 / tie** | #1 GAT 0.7875±0.0175 (SEM 0.0055); gap 0.0008 ≪ combined SEM 0.0092 → statistical tie. Field 0.7772–0.7875 all within noise. **Top-2 met; no meaningful #1** (molhiv is high-variance). LDNA search val AUC 0.8244. |
 
 ---
 
