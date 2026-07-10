@@ -256,9 +256,16 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
 - **Node-level & expressiveness** need their own evaluation paths (single-graph
   transductive accuracy; BREC's pairwise protocol). Define when implementing.
 - "Non-trivial margin": SEM-based; defined in § Objective.
-- **Run logs:** every `train.py` run tees stdout+stderr to `logs/<experiment_name>.txt`
-  (built into `train.py`); the final numbers are also pickled to
-  `logs/<experiment_name>_logger.pickle`.
+- **Run logs:** every `train.py` run tees its stdout to `out/logs/<experiment_name>.txt`
+  (built into `train.py`); when launched via `run_jobs.sh` the same output (plus stderr) is
+  also captured to `out/logs/<experiment_name>.run.log` — a near-duplicate of the `.txt`
+  (only extra content is a `pkg_resources` deprecation warning). The final numbers are also
+  pickled to `out/logs/<experiment_name>_logger.pickle`.
+- **Log housekeeping (`out/logs/` is gitignored — local only):** once a run finishes, its
+  redundant `.run.log` is deleted (the `.txt` is kept) and the `.txt` is filed under
+  `out/logs/ranking/<dataset>/`; hyperparameter-search logs live under `out/logs/search/`.
+  Pickles stay flat in `out/logs/` (the ranking analysis globs them there). This is a manual
+  cleanup applied to **completed** runs only; live runs still write flat to `out/logs/`.
 
 ---
 
