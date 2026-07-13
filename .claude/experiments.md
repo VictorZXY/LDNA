@@ -412,6 +412,34 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-10 | ZINC (full) | LDNA + 10 baselines | tuned h256/l7/do0.144/lr1.19e-4/wd2.23e-6, attention, residual, runs=3, 150ep | test MAE: LDNA 0.0903±0.0037 (SEM 0.0021) | **#2** | #1 PNA 0.0807±0.0119 (SEM 0.0069); PNA lead 0.0096, PNA_upper 0.0876 < LDNA_lower 0.0882 → marginally significant. **Top-2 met, NOT #1** — PNA edges LDNA (PNA high-variance n=3). Field 0.0807–0.8513. LDNA search val MAE 0.342 (subset). |
 | 2026-07-13 | MNISTSuperpixels | LDNA + 10 baselines | tuned h256/l6/do0.128/lr6.65e-4/wd3.25e-6, attention, residual, runs=3, 150ep | test acc: LDNA 0.9357±0.0019 (SEM 0.0011) | **#2** | #1 PNA 0.9532±0.0004 (SEM 0.0002); PNA lead 0.0175, PNA_lower 0.9530 ≫ LDNA_upper 0.9368 → **highly significant**. Top-2 met, NOT #1. egc #3 (0.9288). sage (0.170) + deepergcn_powermean (0.351, huge var) diverge under shared config. Search val acc 0.9319. |
 
+### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
+
+Under the shared-hyperparameter protocol (same `hidden_channels`/`num_layers` for all
+models) the **param counts still differ a lot** because each architecture has a different
+per-layer structure. From `# Params` in the ranking logs, ratios **relative to LDNA (=1.00×)**:
+
+| model | ZINC (h256/l7) | molpcba (h1024/l7) | MNIST (h256/l6) |
+|---|---|---|---|
+| **pna** | **3.47×** | **3.47×** | **3.79×** |
+| gatv2 | 0.62× | 0.62× | 0.54× |
+| gine | 0.43× | 0.43× | (edge-less → gin) |
+| sage | 0.43× | 0.43× | 0.53× |
+| gat | 0.43× | 0.43× | 0.30× |
+| gcn / deepergcn_softmax | 0.24× | 0.24× | 0.30× |
+| egc | 0.22× | 0.16× | 0.27× |
+
+(LDNA absolute: ZINC 2.42M, MNIST 1.69M, molpcba 38.7M.)
+
+- **Invariant to `hidden_channels`:** ZINC (h256) and molpcba (h1024) give **identical** ratios
+  per model — param count ≈ `c_arch · L · H²` (+ encoder/head), so at fixed `L` the ratio
+  cancels `H²`. Ratios **do shift** with `num_layers` and edge-vs-edge-less (MNIST l6/edge-less
+  differs from the l7 edge datasets).
+- **Fairness caveat:** the shared protocol equalizes hidden/layers, **not** param count. **PNA
+  carries ~3.5–3.8× LDNA's params at every setting** — so PNA's #1 on ZINC/MNIST comes with a
+  large capacity advantage, and LDNA reaching top-2 at ≈1/3.5 of PNA's params is an efficiency
+  point in LDNA's favour. A param-normalised comparison (tune each model's width so params ≈
+  LDNA's) is a possible **future** supplementary experiment — not run yet, per user.
+
 ---
 
 ## References
