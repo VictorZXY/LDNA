@@ -5,8 +5,8 @@ model: GAT
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 4
-  dropout: 0.05
+  num_layers: 5
+  dropout: 0.258386
   readout: attention
   residual: true
 
@@ -28,8 +28,8 @@ train_args:
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 6.5e-5
-    weight_decay: 3.0e-4
+    lr: 0.000254164
+    weight_decay: 1.00938e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

@@ -5,10 +5,10 @@ model: LDNA
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 4
+  num_layers: 5
   num_pre_layers: 1
   num_post_layers: 1
-  dropout: 0.05
+  dropout: 0.258386
   readout: attention
   residual: true
 
@@ -19,7 +19,7 @@ data_args:
   batch_size: 128
 
 # Training specific arguments/hyperparameters
-cuda: 1
+cuda: 0
 seed: 42
 train_args:
   runs: 3
@@ -30,8 +30,8 @@ train_args:
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 6.5e-5
-    weight_decay: 3.0e-4
+    lr: 0.000254164
+    weight_decay: 1.00938e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

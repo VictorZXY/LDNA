@@ -1,11 +1,14 @@
-experiment_name: gatv2_code2
+experiment_name: vpa_code2
 
 # Model specific arguments/hyperparameters
-model: GATv2
+model: GNN-VPA
 model_args:
   hidden_channels: 256
   out_channels: 256
   num_layers: 5
+  num_trans_layers: 1
+  eps: 0.0
+  train_eps: True
   dropout: 0.258386
   readout: attention
   residual: true
