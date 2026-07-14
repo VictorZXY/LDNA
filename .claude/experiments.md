@@ -261,11 +261,13 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
   also captured to `out/logs/<experiment_name>.run.log` — a near-duplicate of the `.txt`
   (only extra content is a `pkg_resources` deprecation warning). The final numbers are also
   pickled to `out/logs/<experiment_name>_logger.pickle`.
-- **Log housekeeping (`out/logs/` is gitignored — local only):** once a run finishes, its
-  redundant `.run.log` is deleted (the `.txt` is kept) and the `.txt` is filed under
-  `out/logs/ranking/<dataset>/`; hyperparameter-search logs live under `out/logs/search/`.
-  Pickles stay flat in `out/logs/` (the ranking analysis globs them there). This is a manual
-  cleanup applied to **completed** runs only; live runs still write flat to `out/logs/`.
+- **Log/artifact housekeeping (`out/logs/` is gitignored — local only):** once a run finishes,
+  its redundant `.run.log` is deleted and both its `.txt` log and its `_logger.pickle` are filed
+  together under `out/logs/ranking/<dataset>/` (one folder per dataset holds each config's log +
+  pickle); hyperparameter-search logs live under `out/logs/search/`. This is a manual cleanup
+  applied to **completed** runs only; live runs still write flat to `out/logs/` and are archived
+  when they finish. Ranking analysis reads pickles from `out/logs/ranking/*/` (with a flat
+  `out/logs/` fallback for a just-finished, not-yet-archived config).
 
 ---
 
