@@ -23,7 +23,7 @@ data_args:
 cuda: 0
 seed: 42
 train_args:
-  runs: 3
+  runs: 2
   epochs: 150
   eval_interval: 10
   # loss_fn is handled by the code2 fork in train.py (per-position CrossEntropyLoss);
