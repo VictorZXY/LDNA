@@ -50,21 +50,26 @@
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
   `weights_only=False`.
-- Expressiveness proof (`docs/expressiveness.tex`, self-contained `\input`-able,
-  compile-checked; reading copy `docs/expressiveness.pdf`): paper-style, structured
-  proof that LDNA with a canonical labelling is strictly more expressive than 1-WL.
-  Contains its own refined LDNA formulation (well-typed scatter of messages into slots
-  indexed by global canonical position, update with explicit self-term), the corrected
-  Theorem statement (liftable into the paper), Simulation + Separation lemmas (the
-  separation is algebraic and general: C_{2m} vs C_m⊔C_m, m ≥ 3, via block-straddling
-  slot sets — no numeric constants), a necessity proposition (content-sorted aggregation
-  or any invariant-derived order collapses to exactly 1-WL; vertex-transitive obstruction),
-  and remarks on a.s. ≥1-WL under random continuous init and automorphism invariance.
-  No implementation details (rank modes / isolated nodes / ReLU-BN) by design. Earlier
-  versions in git history: exhaustive code-based analysis at 293756a (feature-mode =
-  1-WL theorem, δ-labelled-graph characterisation, isolated-node necessity), compact
-  paper-coupled version at acf9749. `docs/proof.tex` (untracked, user-managed) holds
-  the paper's Preliminaries + LDNA Architecture, used as notation-style reference only.
+- Expressiveness result (established; write-up lives in the git-ignored paper-prep area,
+  not in project files). Proof idea on record:
+  - Claim: LDNA whose canonical rank comes from a canonical labelling (isomorphism-
+    invariant, tie-individualizing node order) is strictly more expressive than 1-WL.
+  - ⪰ 1-WL: with the rank gate frozen at identity the layer is a plain sum-of-messages
+    aggregator; standard GIN-style injective simulation (finite domains, sum-injective
+    encodings, self-argument in the update).
+  - Strictness: the gate reads the canonical-rank gap δ (via the [δ, |δ|, sign δ]
+    triple, which makes |δ| linearly available). On C_{2m} vs C_m⊔C_m (uniform
+    features — 1-WL-equivalent) with cyclic vs consecutive-block canonical labellings,
+    the per-node integer gap sums are {2m,2m,2,…} vs {m,m,m,m,2,…}: a gate g = 1+|δ|
+    plus injective update/readout separates them.
+  - Necessity: a rank computed from any 1-WL-invariant node quantity folds into the
+    endpoint colours (model collapses to exactly 1-WL); on vertex-transitive 1-WL-hard
+    pairs (Rook 4×4 vs Shrikhande, CSL) every isomorphism-invariant per-node quantity
+    ties all nodes, so δ ≡ 0 — only genuine canonical individualization helps, and it
+    preserves exact permutation invariance (orbit choices yield the same labelled graph).
+  - Extras: random continuous init attains ≥ 1-WL a.s. (embeddings refine colours);
+    strictness needs no randomness. Feature-tie sorting alone (no individualization)
+    is exactly 1-WL — the sort is then purely the invariance device.
 
 ---
 

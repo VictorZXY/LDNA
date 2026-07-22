@@ -180,3 +180,6 @@ playground.*
 
 # Claude Code local settings (personal, per-machine)
 .claude/settings.local.json
+
+# Paper preparation material (not project code)
+docs/
