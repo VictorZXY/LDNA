@@ -1,0 +1,39 @@
+experiment_name: ldna_mnist_rankgate
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 6
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.12787
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: MNISTSuperpixels
+data_args:
+  root: data/mnist/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 1
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000664714
+    weight_decay: 3.24767e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: MNISTEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

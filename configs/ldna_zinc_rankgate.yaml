@@ -1,0 +1,39 @@
+experiment_name: ldna_zinc_rankgate
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 7
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.144427
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ZINC
+data_args:
+  root: data/zinc/
+  batch_size: 512
+
+# Training specific arguments/hyperparameters
+cuda: 1
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: L1Loss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000118959
+    weight_decay: 2.22642e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: min
+  evaluator: ZINCEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
