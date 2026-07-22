@@ -5,11 +5,11 @@ model: DeeperGCN
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 9
+  num_layers: 6
   num_trans_layers: 1
   num_pred_layers: 3
   aggregator: powermean
-  dropout: 0.104699
+  dropout: 0.143105
   readout: attention
   residual: true
 
@@ -23,14 +23,14 @@ data_args:
 cuda: 0
 seed: 42
 train_args:
-  runs: 5
+  runs: 10
   epochs: 150
   eval_interval: 10
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 0.00037377
-    weight_decay: 1.19838e-05
+    lr: 6.29547e-05
+    weight_decay: 4.51778e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

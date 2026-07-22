@@ -19,7 +19,7 @@ data_args:
   batch_size: 128
 
 # Training specific arguments/hyperparameters
-cuda: 0
+cuda: 3
 seed: 42
 train_args:
   runs: 2

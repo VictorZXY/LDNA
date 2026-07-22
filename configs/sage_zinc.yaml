@@ -5,9 +5,9 @@ model: GraphSAGE
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 9
+  num_layers: 7
   num_pred_layers: 3
-  dropout: 0.0389364
+  dropout: 0.144427
   readout: attention
   residual: true
 
@@ -27,8 +27,8 @@ train_args:
   loss_fn: L1Loss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 0.000202783
-    weight_decay: 2.80988e-06
+    lr: 0.000118959
+    weight_decay: 2.22642e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: min
