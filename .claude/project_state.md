@@ -50,19 +50,21 @@
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
   `weights_only=False`.
-- Expressiveness proof (`docs/expressiveness.tex`, `\input`-able, compile-checked;
-  compiled copy `docs/expressiveness.pdf`): compact paper-ready Theorem-1 proof in the
-  paper's notation, based on the paper's LDNA formulation in `docs/proof.tex` (ψ over
-  messages slotted by global canonical position, update with explicit self-term). Core
-  claim: an injective isomorphism-invariant canonical labelling + learnable aggregation
-  is strictly more expressive than 1-WL — GIN-style ⪰ direction plus an explicit C6 vs
-  2·C3 separation with per-slot 2^p weights; remarks: the individualizing labelling is
-  essential (sorted-contents / any 1-WL-invariant order collapses to exactly 1-WL),
-  random continuous init gives a.s. ≥1-WL power, automorphism invariance. The earlier
-  exhaustive code-based version (feature-mode = 1-WL theorem, δ-labelled-graph
-  characterisation, isolated-node necessity) lives in git history at commit 293756a.
-  `docs/proof.tex` (untracked, user-managed) holds the paper's Preliminaries + LDNA
-  Architecture and the superseded old proof.
+- Expressiveness proof (`docs/expressiveness.tex`, self-contained `\input`-able,
+  compile-checked; reading copy `docs/expressiveness.pdf`): paper-style, structured
+  proof that LDNA with a canonical labelling is strictly more expressive than 1-WL.
+  Contains its own refined LDNA formulation (well-typed scatter of messages into slots
+  indexed by global canonical position, update with explicit self-term), the corrected
+  Theorem statement (liftable into the paper), Simulation + Separation lemmas (the
+  separation is algebraic and general: C_{2m} vs C_m⊔C_m, m ≥ 3, via block-straddling
+  slot sets — no numeric constants), a necessity proposition (content-sorted aggregation
+  or any invariant-derived order collapses to exactly 1-WL; vertex-transitive obstruction),
+  and remarks on a.s. ≥1-WL under random continuous init and automorphism invariance.
+  No implementation details (rank modes / isolated nodes / ReLU-BN) by design. Earlier
+  versions in git history: exhaustive code-based analysis at 293756a (feature-mode =
+  1-WL theorem, δ-labelled-graph characterisation, isolated-node necessity), compact
+  paper-coupled version at acf9749. `docs/proof.tex` (untracked, user-managed) holds
+  the paper's Preliminaries + LDNA Architecture, used as notation-style reference only.
 
 ---
 
