@@ -50,14 +50,19 @@
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
   `weights_only=False`.
-- Expressiveness theory (`docs/expressiveness.tex`, `\input`-able, compile-checked):
-  feature-mode LDNA is exactly as expressive as 1-WL (lower bound under min-degree ≥ 1
-  with `add` readout; upper bound unconditional — the feature rank folds into the message
-  function on any 1-WL-indistinguishable pair), and LDNA with an injective canonical rank
-  (position mode / a canonicalized sort) is strictly more expressive (C6 vs 2·C3
-  separation). Also: characterisation as 1-WL on the δ-edge-labelled graph, obstruction
-  for invariant tie-breaks, isolated-node necessity remark. `docs/proof.tex` is an
-  earlier draft kept as reference; it is superseded by `expressiveness.tex`.
+- Expressiveness proof (`docs/expressiveness.tex`, `\input`-able, compile-checked;
+  compiled copy `docs/expressiveness.pdf`): compact paper-ready Theorem-1 proof in the
+  paper's notation, based on the paper's LDNA formulation in `docs/proof.tex` (ψ over
+  messages slotted by global canonical position, update with explicit self-term). Core
+  claim: an injective isomorphism-invariant canonical labelling + learnable aggregation
+  is strictly more expressive than 1-WL — GIN-style ⪰ direction plus an explicit C6 vs
+  2·C3 separation with per-slot 2^p weights; remarks: the individualizing labelling is
+  essential (sorted-contents / any 1-WL-invariant order collapses to exactly 1-WL),
+  random continuous init gives a.s. ≥1-WL power, automorphism invariance. The earlier
+  exhaustive code-based version (feature-mode = 1-WL theorem, δ-labelled-graph
+  characterisation, isolated-node necessity) lives in git history at commit 293756a.
+  `docs/proof.tex` (untracked, user-managed) holds the paper's Preliminaries + LDNA
+  Architecture and the superseded old proof.
 
 ---
 
