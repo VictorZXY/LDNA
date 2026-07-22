@@ -59,7 +59,6 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - `utils/transforms.py`: small transforms.
 - `utils/evaluator.py` and `utils/logger.py`: evaluators and training logs.
 - `configs/`: YAML experiment configs.
-- `local_tests/`: unit tests.
 - `.claude/`: agent-facing project notes.
 
 Important architecture notes:

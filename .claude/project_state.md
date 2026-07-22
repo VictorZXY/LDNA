@@ -28,6 +28,14 @@
   user (2026-07-08), a search that owns its card runs **uncapped** (`--mem_fraction 1.0`) — a
   cap silently OOM-drops large-hidden trials and biases the search; cap only when co-locating
   jobs on one card. All outputs (logs + checkpoints) live under `out/`.
+- LDNA aggregation is rank-gated: `LDNAConv` builds each message from `[x_i, x_j, edge_attr]`
+  via an MLP and scales it by a learned gate `1 + gate_nn([δ, |δ|, sign(δ)])` of the
+  canonical-rank gap δ = nrank_j − nrank_i (zero-init output layer → identity at init).
+  `LDNA` computes the per-node rank under a `rank_mode` knob: `feature` (tie-aware dense rank
+  over the lexsorted feature order; the default) or `position` (intra-graph position for
+  datasets whose node order is canonical by construction — code2's AST DFS order; used by
+  `configs/ldna_code2_rankgate.yaml`). Reruns of the rank-gated LDNA with the previously
+  tuned shared params: ZINC done, molhiv/molpcba/MNIST in flight, code2 pending a GPU slot.
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
   and `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
   `VariancePreservingAggregation`, `sum/√N`). `GIN` xor `GINE` runs per dataset by edge
