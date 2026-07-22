@@ -356,10 +356,16 @@ def _train_LDNA_code2(
 
 def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
               min_delta: float = 1e-3, device: str = 'cuda:0',
-              mem_fraction: float = 0.30) -> float:
+              mem_fraction: float = 0.30,
+              fix_hidden_channels=None, fix_num_layers=None) -> float:
     # --- Search spaces for the hyperparameters ---
-    hidden_channels = trial.suggest_categorical('hidden_channels', [128, 256, 512, 1024])
-    num_layers = trial.suggest_int('num_layers', 2, 8)
+    # Architecture can be pinned via `fix_*` to search only the training knobs (dropout/lr/wd).
+    # This is faster: it drops the expensive large-model trials and shrinks the search space,
+    # while keeping the pinned width/depth as a shared value for the fairness protocol.
+    hidden_channels = fix_hidden_channels if fix_hidden_channels is not None \
+        else trial.suggest_categorical('hidden_channels', [128, 256, 512, 1024])
+    num_layers = fix_num_layers if fix_num_layers is not None \
+        else trial.suggest_int('num_layers', 2, 8)
     dropout = trial.suggest_float('dropout', 0.1, 0.7)
     # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
     # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
@@ -409,7 +415,9 @@ def main(args):
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
                                     epochs=args.epochs, patience=args.patience,
-                                    min_delta=args.min_delta, mem_fraction=args.mem_fraction),
+                                    min_delta=args.min_delta, mem_fraction=args.mem_fraction,
+                                    fix_hidden_channels=args.fix_hidden_channels,
+                                    fix_num_layers=args.fix_num_layers),
             n_trials=args.n_trials,
             catch=(RuntimeError,),
         )
@@ -439,6 +447,10 @@ if __name__ == '__main__':
     parser.add_argument('--patience', type=int, default=20)
     parser.add_argument('--min_delta', type=float, default=1e-3)
     parser.add_argument('--n_trials', type=int, default=100)
+    # Pin architecture to search only the training knobs (dropout/lr/wd); leave unset to search
+    # width/depth as well. Faster search when set (drops large-model trials, lower-dim space).
+    parser.add_argument('--fix_hidden_channels', type=int, default=None)
+    parser.add_argument('--fix_num_layers', type=int, default=None)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--log_dir', type=str, default='out/logs/')
 
