@@ -50,6 +50,14 @@
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
   `weights_only=False`.
+- Expressiveness theory (`docs/expressiveness.tex`, `\input`-able, compile-checked):
+  feature-mode LDNA is exactly as expressive as 1-WL (lower bound under min-degree ≥ 1
+  with `add` readout; upper bound unconditional — the feature rank folds into the message
+  function on any 1-WL-indistinguishable pair), and LDNA with an injective canonical rank
+  (position mode / a canonicalized sort) is strictly more expressive (C6 vs 2·C3
+  separation). Also: characterisation as 1-WL on the δ-edge-labelled graph, obstruction
+  for invariant tie-breaks, isolated-node necessity remark. `docs/proof.tex` is an
+  earlier draft kept as reference; it is superseded by `expressiveness.tex`.
 
 ---
 

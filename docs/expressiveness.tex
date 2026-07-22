@@ -1,0 +1,697 @@
+\section{Expressiveness of LDNA}
+\label{sec:expr}
+
+This section characterises the representational power of the Learnable Dynamic
+Neighborhood Aggregation model (LDNA). The reference point is the
+one-dimensional Weisfeiler--Leman test (1-WL) of
+\citet{weisfeiler1968reduction}, the standard yardstick for message-passing
+graph neural networks \citep{xu2019gin,morris2019wl}. All statements are about
+the model \emph{class}:
+they concern the existence of parameters realising a given behaviour, not about
+any particular trained instance. Throughout, $\{\!\{\cdot\}\!\}$ denotes a
+multiset (a set with repetitions), and for a finite multiset $M$ over a set $A$
+we write $M(a)$ for the multiplicity of $a\in A$.
+
+\subsection{Setup}
+\label{sec:expr-setup}
+
+\paragraph{Attributed graphs.}
+An attributed graph is $G=(V,E,x,e)$ with node set $V$, directed edge set
+$E\subseteq V\times V$ (an undirected edge is the pair of its two orientations),
+a node-feature map $x:V\to\Sigma$ and, when present, an edge-feature map
+$e:E\to\Xi$, $e_{uv}:=e(u,v)$. We write $N(v)=\{u:(u,v)\in E\}$ for the
+in-neighbourhood and $n=|V|$. We make the following standing assumptions.
+
+\begin{itemize}
+  \item \textbf{Finite alphabets, bounded size.} The node alphabet
+        $\Sigma\subset\mathbb{R}^{d_0}$ and the edge alphabet $\Xi$ are finite,
+        and graph sizes are bounded, $n\le N$. This is what makes exact,
+        finite-domain constructions available: an MLP with $\mathrm{ReLU}$
+        activations can interpolate \emph{any} prescribed function on a finite
+        input set exactly (\cref{lem:mlp-interp}), so no appeal to universal
+        approximation is needed anywhere below.
+  \item \textbf{Minimum degree one.} Every node has at least one neighbour,
+        $N(v)\ne\emptyset$. Unlike the previous item this is not universally
+        satisfied by the datasets --- isolated nodes do occur in practice (e.g.\
+        single-atom fragments in molecular graphs) --- so we invoke it only where
+        it is stated. It is used solely by the lower-bound constructions
+        (\cref{thm:ldna-lower}, the $\succeq$ direction of
+        \cref{prop:delta-charac}, \cref{thm:feature-wl}(a) and
+        \cref{thm:canon-strict}), to let a node's own colour be recovered from
+        its non-empty aggregation; the upper-bound statements
+        (\cref{thm:feature-wl}(b), \cref{prop:invariant-obstruction} and the
+        $\preceq$ direction of \cref{prop:delta-charac}) hold for all graphs
+        without it. Its necessity is examined in \cref{remark:isolated}.
+\end{itemize}
+
+\paragraph{The LDNA layer.}
+Nodes carry hidden states $h_v^{(t)}\in\mathbb{R}^{d_t}$, and each node has a
+scalar \emph{canonical rank} $r(v)\in[0,1)$ fixed once per graph (defined
+below). One LDNA layer (the module \texttt{LDNAConv}) computes, for every
+directed edge $u\to v$ with $u\in N(v)$, a pre-message, a per-channel gate of
+the rank gap, and a post-transform of the gated sum:
+\begin{align}
+  m_{uv} &= \operatorname{pre}\!\big([\,h_v^{(t)},\,h_u^{(t)},\,e_{uv}\,]\big),
+  \label{eqn:expr-pre}\\
+  \delta_{uv} &= r(u)-r(v),\qquad
+  g(\delta) = \mathbf{1} + \operatorname{MLP}_g\!\big([\,\delta,\ |\delta|,\ \operatorname{sign}\delta\,]\big),
+  \label{eqn:expr-gate}\\
+  h_v^{(t+1)} &= \operatorname{post}\!\Big(\ \sum_{u\in N(v)} g(\delta_{uv})\odot m_{uv}\ \Big),
+  \label{eqn:expr-update}
+\end{align}
+where $\odot$ is the Hadamard product, $\operatorname{pre}$ and
+$\operatorname{post}$ are MLPs (the term $e_{uv}$ is omitted when there are no
+edge features), and $\operatorname{MLP}_g$ is a two-layer network
+$\mathrm{Linear}\to\mathrm{ReLU}\to\mathrm{Linear}$ whose output has the channel
+dimension of $m_{uv}$. The output layer of $\operatorname{MLP}_g$ is initialised
+to zero, so $g\equiv\mathbf{1}$ is exactly realisable (and is the value at
+initialisation): with $g\equiv\mathbf{1}$ the layer is a plain summing
+message-passing layer.
+
+\paragraph{The LDNA network.}
+The wrapper (\texttt{LDNA}) applies a node encoder and, if present, an edge
+encoder; then a stack of $L$ blocks, each a layer
+\labelcref{eqn:expr-pre,eqn:expr-gate,eqn:expr-update} followed by BatchNorm, a
+pointwise activation and dropout, with an optional per-layer residual
+$h_v^{(t+1)}\mathrel{+}= W h_v^{(t)}$ ($W$ the identity where the layer preserves
+width, a learnable linear map where it changes width); then a permutation-%
+invariant readout in
+$\{\textsf{add},\textsf{mean},\textsf{max},\textsf{attention}\}$ (\textsf{add}
+$=$ sum, \textsf{mean} $=$ average, \textsf{max} $=$ coordinatewise maximum,
+\textsf{attention} $=$ a softmax-weighted sum, PyG's
+\texttt{AttentionalAggregation}) or the order-sensitive \textsf{gru} readout (a
+GRU over the sorted node sequence); and finally a prediction MLP. We treat the
+\textsf{gru} readout separately in \cref{remark:gru}; the four listed readouts
+are all functions of the multiset $\{\!\{h_v^{(L)}:v\in V\}\!\}$.
+
+\begin{remark}[Inference-time normalisation]
+\label{remark:bn}
+We analyse the network at inference. Dropout is then inactive, and BatchNorm is
+a fixed affine map $z\mapsto\gamma\odot(z-\mu)/\sigma+\beta$, which can be
+absorbed into the adjacent MLP; wherever a construction needs it we take this
+affine map to be the identity. We do not mention BatchNorm or dropout again.
+\end{remark}
+
+\paragraph{Canonical rank.}
+The rank $r$ is supplied to \cref{eqn:expr-gate} in one of two modes. In both,
+only within-graph gaps $\delta_{uv}=r(u)-r(v)$ are ever used (all edges are
+intra-graph), so any per-graph additive offset in $r$ is immaterial.
+
+\emph{Feature mode.} Nodes are first put into a fixed data-side canonical order
+by sorting each graph lexicographically by its raw feature rows
+(\texttt{sort\_graph}); this fixes a total order $<_{\mathrm{lex}}$ on the finite
+alphabet $\Sigma$. Let $X_G=\{x_v:v\in V\}\subseteq\Sigma$ be the \emph{set} of
+distinct rows occurring in $G$ and
+\begin{equation}
+  \rho_G(x)\;=\;\big|\{\,x'\in X_G:\ x'<_{\mathrm{lex}}x\,\}\big|
+  \label{eqn:expr-dense-rank}
+\end{equation}
+the tie-aware \emph{dense} rank of a row (nodes sharing a row share a rank).
+The feature-mode rank is
+\begin{equation}
+  r(v)\;=\;\rho_G(x_v)\,/\,n .
+  \label{eqn:expr-feature-rank}
+\end{equation}
+Normalisation is by $n=|V|$, the number of nodes, not the number of distinct
+rows.
+
+\emph{Position mode.} When the data already supplies a canonical total order of
+the nodes by construction (for instance the abstract-syntax-tree depth-first
+order of \texttt{ogbg-code2}), $r(v)=p(v)/n$, where $p(v)\in\{0,\dots,n-1\}$ is
+the position of $v$ in that order.
+
+\paragraph{The reference test.}
+The 1-WL colour refinement with edge colours assigns
+\begin{equation}
+  c_v^{(0)}=x_v,\qquad
+  c_v^{(t+1)}=\operatorname{HASH}\!\Big(c_v^{(t)},\ \{\!\{\,(c_u^{(t)},e_{uv}):u\in N(v)\,\}\!\}\Big),
+  \label{eqn:expr-wl}
+\end{equation}
+with $\operatorname{HASH}$ injective; colours range over a finite set at each
+round. The round-$(t{+}1)$ partition refines the round-$t$ partition, and it is
+monotone: two nodes with distinct round-$t$ colours have distinct round-$(t{+}1)$
+colours. We say $G$ and $H$ are \emph{1-WL-indistinguishable}, $G\sim_{1\text{-WL}}H$,
+if for every $t$ their colour histograms agree,
+$\{\!\{c_v^{(t)}:v\in V_G\}\!\}=\{\!\{c_w^{(t)}:w\in V_H\}\!\}$; this forces
+$|V_G|=|V_H|$. Because refinement is monotone, if the histograms differ at some
+round $t^\ast$ they differ at every round $t\ge t^\ast$; in particular they
+differ at the stable round $T\le N-1$ at which refinement terminates on all
+graphs of size $\le N$.
+
+\begin{definition}[Distinguishing power]
+\label{def:expr}
+For a model class $\mathcal{M}$ (all parameters and widths), $\mathcal{M}$
+\emph{distinguishes} a pair $(G,H)$ if there exist parameters $\theta$ with
+$\mathcal{M}_\theta(G)\ne\mathcal{M}_\theta(H)$. We say $\mathcal{M}$ is
+\emph{at least as expressive as} 1-WL, $\mathcal{M}\succeq 1\text{-WL}$, if it
+distinguishes every 1-WL-distinguishable pair; $\mathcal{M}$ is \emph{strictly
+more expressive} than 1-WL if in addition it distinguishes some pair with
+$G\sim_{1\text{-WL}}H$.
+\end{definition}
+
+\paragraph{Two constructive lemmas.}
+The proofs use only the following two elementary facts; neither uses universal
+approximation.
+
+\begin{lemma}[Exact finite interpolation]
+\label{lem:mlp-interp}
+Let $S\subset\mathbb{R}^d$ be finite and $\psi:S\to\mathbb{R}^m$ arbitrary.
+There is a two-layer $\mathrm{ReLU}$ network
+$F(z)=W_2\,\sigma(W_1z+b_1)+b_2$ ($\sigma=\mathrm{ReLU}$) with $F|_S=\psi$.
+\end{lemma}
+
+\begin{proof}
+Choose $w\in\mathbb{R}^d$ with the scalars $t_s:=\langle w,s\rangle$ pairwise
+distinct over $s\in S$; the excluded $w$ form the finite union of hyperplanes
+$\{w:\langle w,s-s'\rangle=0\}$, $s\ne s'$, so such $w$ exist. Order
+$S=\{s_1,\dots,s_K\}$ so that $t_1<\dots<t_K$, and write $y_k=\psi(s_k)$. It
+suffices to build, for each output coordinate $j$, a continuous piecewise-linear
+$f_j:\mathbb{R}\to\mathbb{R}$ with $f_j(t_k)=(y_k)_j$ and to set
+$F(z)_j=f_j(\langle w,z\rangle)$. Writing
+$a_k=\big((y_{k+1})_j-(y_k)_j\big)/(t_{k+1}-t_k)$ for the slope on
+$[t_k,t_{k+1}]$ ($k=1,\dots,K-1$) and setting $a_0:=0$, define
+\[
+  f_j(t)\;=\;(y_1)_j\;+\;\sum_{k=1}^{K-1} (a_k-a_{k-1})\,\sigma(t-t_k) .
+\]
+For $t\le t_1$ every $\sigma(t-t_k)$ vanishes, so $f_j(t)=(y_1)_j$; in particular
+$f_j(t_1)=(y_1)_j$. On the interval $(t_k,t_{k+1})$ exactly the units
+$\sigma(t-t_1),\dots,\sigma(t-t_k)$ are active, so the slope of $f_j$ telescopes
+to $\sum_{i=1}^{k}(a_i-a_{i-1})=a_k$; hence there $f_j$ is affine with slope
+$a_k$, and $f_j(t_{k+1})=f_j(t_k)+a_k(t_{k+1}-t_k)=(y_{k+1})_j$, so by induction
+on $k$ the map $f_j$ interpolates the points $(t_k,(y_k)_j)$. Each of the $K-1$
+hidden units computes $\sigma(\langle w,z\rangle-t_k)$ (a single $\mathrm{ReLU}$
+of an affine form), and the outer layer takes the stated linear combination with
+the constant $(y_1)_j$ in the output bias, so $F$ is a two-layer $\mathrm{ReLU}$
+network.
+\end{proof}
+
+\begin{lemma}[Sum-injective encodings]
+\label{lem:sum-inj}
+Let $A$ be finite, $|A|=K$, and fix a bijection $\iota:A\to\{1,\dots,K\}$. The
+one-hot map $\chi(a)=e_{\iota(a)}\in\mathbb{R}^K$ satisfies, for all finite
+multisets $M,M'$ over $A$,
+$\sum_{a\in M}\chi(a)=\sum_{a\in M'}\chi(a)\iff M=M'$. Moreover, for multisets of
+size $\le N$ the scalar $\sum_{a\in M}(N+1)^{\iota(a)-1}$ is injective in $M$.
+\end{lemma}
+
+\begin{proof}
+$\sum_{a\in M}\chi(a)$ is the count vector $\big(M(a)\big)_{a\in A}$, which
+determines $M$ and conversely. For the scalar version, the multiplicities
+$M(a)\le N<N+1$ are the digits of a base-$(N+1)$ integer, whose representation is
+unique.
+\end{proof}
+
+The $\operatorname{pre}$ and $\operatorname{post}$ MLPs below are taken with at
+least one hidden layer (i.e.\ \texttt{num\_pre\_layers},
+\texttt{num\_post\_layers}$\ \ge 2$), a valid configuration; \cref{lem:mlp-interp}
+is then applied to realise them exactly on their finite domains. The node and
+edge encoders are the implemented ones and are \emph{not} assumed to be such
+MLPs: they need only be \emph{injective} on the finite alphabet, which every
+implemented family provides --- a single embedding table (choose distinct rows),
+an additive multi-column encoder (\texttt{AtomEncoder}, a sum of per-column
+embeddings placed on disjoint coordinate blocks, so the sum is a concatenation),
+or a scalar $\mathrm{Linear}(1,d)$ (any nonzero weight). Finally, in the
+implementation the $\operatorname{pre}$ and gate output width is tied to the
+layer's input width, so ``message width'' below refers to the layer's hidden
+width, which is free (all widths are quantified over in \cref{def:expr}).
+
+\subsection{A lower bound in every rank mode}
+\label{sec:expr-lower}
+
+\begin{proposition}[Lower bound]
+\label{thm:ldna-lower}
+Under minimum degree one, with the \textsf{add} readout, LDNA is at least as
+expressive as 1-WL, $\text{LDNA}\succeq 1\text{-WL}$, in every rank mode.
+\end{proposition}
+
+\begin{proof}
+Set the gate to the constant $g\equiv\mathbf{1}$ by zeroing the output layer of
+$\operatorname{MLP}_g$ (\cref{eqn:expr-gate}); the rank then plays no role and the
+argument is identical in every mode. The layer reduces to
+$h_v^{(t+1)}=\operatorname{post}\big(\sum_{u\in N(v)}\operatorname{pre}([h_v^{(t)},h_u^{(t)},e_{uv}])\big)$.
+Let $C_t$ be the finite set of round-$t$ 1-WL colours.
+
+We claim that there are parameters and, for each $t$, a map
+$\alpha_t:C_t\to\mathbb{R}^{d_t}$ with $h_v^{(t)}=\alpha_t(c_v^{(t)})$ for every
+node of every graph of size $\le N$, where $\alpha_0$ is injective and, for
+$t\ge 1$, $\alpha_t$ is one-hot. (One layer already produces a one-hot code, and
+the readout argument below runs at some $L\ge 1$.)
+
+\emph{Base.} $c_v^{(0)}=x_v\in\Sigma$, and the node encoder gives
+$h_v^{(0)}=\alpha_0(x_v)$ with $\alpha_0$ injective on the finite $\Sigma$ (any of
+the implemented encoders, as above). Injectivity of $\alpha_0$ is all that the
+step below uses at $t=0$.
+
+\emph{Step.} Assume $h_v^{(t)}=\alpha_t(c_v^{(t)})$ with $\alpha_t$ injective
+(and one-hot when $t\ge 1$). Since $\alpha_t$ is invertible on its image, from
+$[h_v^{(t)},h_u^{(t)},e_{uv}]$ one can read off the triple
+$(c_v^{(t)},c_u^{(t)},e_{uv})$, an element of $C_t\times C_t\times\Xi$. Choose
+$\operatorname{pre}$, via \cref{lem:mlp-interp}, to output the one-hot
+$\chi(c_v^{(t)},c_u^{(t)},e_{uv})$ of this triple. Because $c_v^{(t)}$ is
+constant over $u\in N(v)$, the aggregated vector
+\[
+  J_v \;=\; \sum_{u\in N(v)} \chi\big(c_v^{(t)},c_u^{(t)},e_{uv}\big)
+\]
+is supported on the block indexed by $c_v^{(t)}$, and within that block it is,
+by \cref{lem:sum-inj}, the histogram of
+$\{\!\{(c_u^{(t)},e_{uv}):u\in N(v)\}\!\}$. Thus $J_v$ encodes the pair
+$\big(c_v^{(t)},\{\!\{(c_u^{(t)},e_{uv})\}\!\}\big)$ injectively; the aggregation
+is non-empty because no node is isolated. By \cref{eqn:expr-wl} and injectivity of
+$\operatorname{HASH}$, this pair is in bijection with $c_v^{(t+1)}$, so $J_v$
+takes a distinct value for each colour $c_v^{(t+1)}\in C_{t+1}$, over a finite
+set of possible values. Choose $\operatorname{post}$, via \cref{lem:mlp-interp},
+to send each such $J_v$ to the one-hot $\alpha_{t+1}(c_v^{(t+1)})$. One-hot
+codes are non-negative, so the intervening $\mathrm{ReLU}$ acts as the identity
+(\cref{remark:bn}). Take the widths strictly increasing so that every residual
+projection is a learnable map, set to zero; the residual connections are thus
+present but inert here. This proves the claim.
+
+\emph{Graph level.} Run $L=\max(T,1)$ layers, where $T\le N-1$ is the stable
+round; then $L\ge 1$, so $h_v^{(L)}=\alpha_L(c_v^{(L)})$ is one-hot, and the
+\textsf{add} readout returns $\sum_{v}\alpha_L(c_v^{(L)})$, the histogram of
+round-$L$ colours, which by \cref{lem:sum-inj} is injective in the multiset
+$\{\!\{c_v^{(L)}\}\!\}$. If $G,H$ are 1-WL-distinguishable they differ at some
+round, hence (by monotonicity) at round $L$, so the two readouts differ; an
+identity (or any injective) prediction head preserves the difference. Hence LDNA
+distinguishes $(G,H)$.
+\end{proof}
+
+\begin{remark}[Isolated nodes and the necessity of minimum degree one]
+\label{remark:isolated}
+The hypothesis $N(v)\ne\emptyset$ is essential to \cref{thm:ldna-lower}, not
+cosmetic, and isolated nodes do occur in practice (for instance single-atom
+fragments in molecular graphs). One might hope the residual could rescue them,
+but it cannot, because of the layer ordering in the implementation: the
+activation is applied to the convolution output \emph{before} the residual is
+added, and for an isolated node the aggregation is $J_v\equiv 0$ for every choice
+of parameters. Its update therefore collapses to an affine recurrence
+$h_v^{(t+1)}=b_t+W_t h_v^{(t)}$, with $b_t=\mathrm{ReLU}(\mathrm{BN}(\operatorname{post}(0)))$
+a constant and $W_t$ the residual projection, so $h_v^{(L)}$ is an \emph{affine}
+function of $\text{enc}(x_v)$. Take moreover the node encoder to be affine in a
+scalar feature --- a $\mathrm{Linear}(1,d)$ encoder, a supported configuration ---
+so $h_v^{(L)}=c+Ax_v$ for a fixed vector $c$ and matrix $A$. Then on any two
+graphs consisting only of isolated nodes the \textsf{add} readout returns
+$\sum_v(c+Ax_v)=|V|\,c+A\sum_v x_v$, which depends only on the node count and the
+\emph{sum} of features: the feature multisets $\{\!\{1,3\}\!\}$ and
+$\{\!\{2,2\}\!\}$ collide, though 1-WL separates them. Thus for the class with an
+affine-in-a-scalar encoder and the \textsf{add} readout, minimum degree one
+cannot be dropped from \cref{thm:ldna-lower}.
+\end{remark}
+
+\begin{remark}[Cardinality-blind readouts]
+\label{remark:readout-cardinality}
+The proposition uses \textsf{add}, which the class includes. The \textsf{mean}
+and \textsf{attention} readouts are normalised (softmax weights sum to one), so
+they see only the \emph{distribution} of final embeddings, not their multiset
+with multiplicities. Consequently they cannot separate a graph $G$ from the
+disjoint union $G\sqcup G$: the colour multiset of $G\sqcup G$ is that of $G$
+with every multiplicity doubled, so \textsf{mean} and \textsf{attention} return
+identical values on $G$ and $G\sqcup G$, whereas 1-WL distinguishes them (their
+colour histograms, and indeed their sizes, differ). This is why the lower bound
+is stated for \textsf{add}; cf.\ the analogous discussion of the mean aggregator
+by \citet{xu2019gin}.
+\end{remark}
+
+\subsection{Exact characterisation via a rank-augmented test}
+\label{sec:expr-char}
+
+Fix a rank function $r$. Define the \emph{rank-augmented graph} $G^r$ to have the
+same nodes, edges and features as $G$, with each directed edge $u\to v$ carrying
+the augmented colour $(e_{uv},\delta_{uv})$, $\delta_{uv}=r(u)-r(v)$. Let
+$1\text{-WL}^r$ denote edge-coloured 1-WL run on $G^r$: it is
+\cref{eqn:expr-wl} with the neighbour term replaced by
+$\{\!\{(c_u^{(t)},e_{uv},\delta_{uv}):u\in N(v)\}\!\}$.
+
+\begin{proposition}[Characterisation]
+\label{prop:delta-charac}
+For any fixed rank $r$, LDNA with rank $r$ has exactly the distinguishing power
+of $1\text{-WL}^r$; the $\succeq$ direction assumes minimum degree one.
+\end{proposition}
+
+\begin{proof}
+\emph{Upper bound ($\preceq$).} Each LDNA message
+$g(\delta_{uv})\odot m_{uv}$ depends only on
+$(h_v^{(t)},h_u^{(t)},e_{uv},\delta_{uv})$, so a layer is a message-passing
+update on the edge-coloured graph $G^r$. By induction on $t$ there is a map
+$\Phi_t$ (parameter-dependent, but the same function for all graphs) with
+$h_v^{(t)}=\Phi_t\big(c_v^{(t),r}\big)$, where $c^{(\cdot),r}$ are the
+$1\text{-WL}^r$ colours: the base is the encoder, and the step holds because
+\cref{eqn:expr-pre,eqn:expr-gate,eqn:expr-update} turn
+$\big(c_v^{(t),r},\{\!\{(c_u^{(t),r},e_{uv},\delta_{uv})\}\!\}\big)$ into
+$h_v^{(t+1)}$, and that pair is determined by $c_v^{(t+1),r}$. Every
+permutation-invariant readout is a function of the final colour histogram, so
+graphs with equal $1\text{-WL}^r$ histograms at all rounds receive equal
+outputs.
+
+\emph{Lower bound ($\succeq$).} Assuming minimum degree one, we adapt
+\cref{thm:ldna-lower} to also encode $\delta$. The gate is per-channel and
+depends on $\delta$, while
+$\operatorname{pre}$ depends on $(h_v,h_u,e)$ but not on $\delta$; their Hadamard
+product lets us form a \emph{joint} one-hot of the quadruple
+$(c_v^{(t)},c_u^{(t)},e_{uv},\delta_{uv})$. Concretely, $\delta$ ranges over a
+finite set $D$ (there are finitely many graphs of size $\le N$, hence finitely
+many gap values; for the model's own rank modes $D\subseteq\{k/n:|k|<n\le N\}$);
+index the message channels by
+$(a,b,\varepsilon,j)$ with $(a,b,\varepsilon)\in C_t\times C_t\times\Xi$ and
+$j$ indexing $D$. Let $\operatorname{pre}$ output, on channel
+$(a,b,\varepsilon,j)$, the indicator
+$\mathbf{1}[(c_v^{(t)},c_u^{(t)},e_{uv})=(a,b,\varepsilon)]$ (independent of $j$),
+and let the gate output, on that channel,
+$\mathbf{1}[\delta_{uv}=\delta_j]$ (independent of $(a,b,\varepsilon)$): the map
+$\delta\mapsto[\delta,|\delta|,\operatorname{sign}\delta]$ is injective on the
+finite $D$, so \cref{lem:mlp-interp} realises this indicator (minus one) with
+$\operatorname{MLP}_g$. The product on channel $(a,b,\varepsilon,j)$ is
+$\mathbf{1}[(c_v^{(t)},c_u^{(t)},e_{uv},\delta_{uv})=(a,b,\varepsilon,\delta_j)]$,
+a one-hot of the quadruple. Summing over $u\in N(v)$ (with $c_v^{(t)}$ constant)
+gives, exactly as in \cref{thm:ldna-lower}, an injective encoding of
+$\big(c_v^{(t)},\{\!\{(c_u^{(t)},e_{uv},\delta_{uv})\}\!\}\big)$, which by
+injectivity of $\operatorname{HASH}$ is in bijection with $c_v^{(t+1),r}$;
+$\operatorname{post}$ maps it to the one-hot $\alpha_{t+1}(c_v^{(t+1),r})$. Thus
+LDNA simulates $1\text{-WL}^r$, and the \textsf{add} readout recovers its colour
+histogram, as before.
+\end{proof}
+
+\subsection{Feature mode collapses to 1-WL}
+\label{sec:expr-feature}
+
+\begin{lemma}[Rank rigidity in feature mode]
+\label{lem:rank-rigid}
+If $G\sim_{1\text{-WL}}H$ then
+\begin{enumerate}
+  \item[(i)] $n_G=n_H=:n$;
+  \item[(ii)] the multisets of raw feature rows of $G$ and $H$ coincide, hence
+        the sets $X_G=X_H$ of distinct rows coincide and inherit the same order
+        $<_{\mathrm{lex}}$;
+  \item[(iii)] $\rho_G=\rho_H=:\rho$ as functions, and the feature-mode rank is
+        $r(v)=\rho(x_v)/n$ in both graphs --- one fixed function of a node's own
+        raw feature row, shared by $G$ and $H$.
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+$G\sim_{1\text{-WL}}H$ requires equal round-$0$ histograms,
+$\{\!\{x_v:v\in V_G\}\!\}=\{\!\{x_w:w\in V_H\}\!\}$. Equal multiset cardinalities
+give (i); equal multisets have equal underlying sets $X_G=X_H$, and
+$<_{\mathrm{lex}}$ is a fixed total order on $\Sigma$ that restricts identically
+to the common set, giving (ii). By \cref{eqn:expr-dense-rank}, $\rho_G$ depends only on
+$(X_G,<_{\mathrm{lex}})$, so $\rho_G=\rho_H=\rho$; with the common $n$ from (i),
+\cref{eqn:expr-feature-rank} gives (iii).
+\end{proof}
+
+\begin{theorem}[Feature mode equals 1-WL]
+\label{thm:feature-wl}
+In feature mode:
+\begin{enumerate}
+  \item[(a)] under minimum degree one, with the \textsf{add} readout,
+        $\text{LDNA}\succeq 1\text{-WL}$;
+  \item[(b)] for every parameter setting and every permutation-invariant readout
+        ($\textsf{add}$, $\textsf{mean}$, $\textsf{max}$, $\textsf{attention}$),
+        $G\sim_{1\text{-WL}}H$ implies identical outputs on $G$ and $H$.
+\end{enumerate}
+Hence feature-mode LDNA is exactly as expressive as 1-WL.
+\end{theorem}
+
+\begin{proof}
+Part (a) is \cref{thm:ldna-lower}, which is rank-mode-agnostic. For part (b),
+fix $G\sim_{1\text{-WL}}H$ and any parameters. By \cref{lem:rank-rigid} the gap
+\begin{equation}
+  \delta_{uv}=\frac{\rho(x_u)-\rho(x_v)}{n}
+  \label{eqn:expr-delta-folded}
+\end{equation}
+is one fixed function of the raw endpoint rows, common to $G$ and $H$.
+
+We show by induction on $t$ that there is a function $\phi_t$ (parameter-%
+dependent, common to both graphs) with $h_v^{(t)}=\phi_t(c_v^{(t)})$ for all
+nodes of $G$ and $H$. The base is $h_v^{(0)}=\text{encoder}(x_v)$ with
+$c_v^{(0)}=x_v$, so $\phi_0=\text{encoder}$. For the step, recall that
+$c_v^{(t)}$ refines $c_v^{(0)}=x_v$, so $c_v^{(t)}$ determines $x_v$ and hence
+$\rho(x_v)$; likewise for each neighbour. Therefore every ingredient of
+\cref{eqn:expr-pre,eqn:expr-gate,eqn:expr-update} --- the messages
+$m_{uv}=\operatorname{pre}([\phi_t(c_v^{(t)}),\phi_t(c_u^{(t)}),e_{uv}])$, the
+gate $g(\delta_{uv})$ with $\delta_{uv}$ read off from $(c_v^{(t)},c_u^{(t)})$
+via \cref{eqn:expr-delta-folded}, the sum over $u\in N(v)$, and $\operatorname{post}$
+--- is determined by
+$\big(c_v^{(t)},\{\!\{(c_u^{(t)},e_{uv}):u\in N(v)\}\!\}\big)$, which by
+injectivity of $\operatorname{HASH}$ is determined by $c_v^{(t+1)}$. The residual
+$W\phi_t(c_v^{(t)})$, the affine BatchNorm and the pointwise activation act
+node-wise and preserve this dependence (each is a function of $c_v^{(t+1)}$,
+which determines $c_v^{(t)}$). Set $\phi_{t+1}$ accordingly.
+
+At the graph level, $G\sim_{1\text{-WL}}H$ gives equal final colour histograms,
+hence equal multisets $\{\!\{h_v^{(T)}\}\!\}=\{\!\{\phi_T(c_v^{(T)})\}\!\}$. The
+readouts $\textsf{add}$, $\textsf{mean}$ (the sizes agree by
+\cref{lem:rank-rigid}(i)), $\textsf{max}$ and $\textsf{attention}$ are all
+functions of this multiset, so the graph embeddings agree; the prediction MLP is
+pointwise, so the outputs agree.
+
+Equivalently, via \cref{prop:delta-charac}: by \cref{eqn:expr-delta-folded} the
+augmented edge colour $(e_{uv},\delta_{uv})$ is a function of the endpoints'
+round-$0$ colours, so $1\text{-WL}^r$ and $1\text{-WL}$ induce the same
+partition, and the characterisation collapses to plain 1-WL. Combining (a) and
+(b) proves the claim.
+\end{proof}
+
+\begin{corollary}
+\label{cor:arg-config}
+Consider attributed regular graphs --- graphs whose nodes split into classes
+$V_1,\dots,V_k$, all nodes of class $V_i$ sharing the attribute $C_i$, such that
+every node of class $V_i$ has exactly $r_{ij}$ neighbours in class $V_j$. Encode
+this as the configuration $\{(C_i,C_j,r_{ij}):1\le i,j\le k\}$, which records the
+attributes as well as the counts. Then any two such graphs without edge features
+(or with edge features constant on each ordered pair of classes) that have equal
+configurations and equal class sizes are 1-WL-indistinguishable, and hence
+receive identical feature-mode LDNA outputs for every parameter setting.
+\end{corollary}
+
+\begin{proof}
+The partition into classes is equitable and each class carries a fixed attribute:
+the counts $r_{ij}$ and the attributes $C_i$ are constant across each class, and
+the edge colours (absent, or constant on each ordered class pair) add nothing.
+Hence 1-WL initialised at the attributes stabilises at this partition, and each
+round-$t$ colour is a function of a node's class alone, determined by the
+configuration. Two such graphs with equal configurations and equal class sizes
+therefore have equal round-$0$ histograms and equal colour histograms at every
+round, i.e.\ $G\sim_{1\text{-WL}}H$. Apply \cref{thm:feature-wl}(b).
+\end{proof}
+
+\subsection{Invariant tie-breaking does not help robustly}
+\label{sec:expr-invariant}
+
+\Cref{thm:feature-wl} shows that a rank read off the raw features is folded away.
+One might hope to strengthen the rank by sorting on a richer node quantity. The
+next proposition shows that any \emph{isomorphism-invariant} choice of rank
+remains bounded by 1-WL, and fails outright on the classical hard instances.
+
+\begin{proposition}[Obstruction for invariant ranks]
+\label{prop:invariant-obstruction}
+\begin{enumerate}
+  \item[(i)] Let $r$ be obtained by sorting nodes on any node invariant $\iota$
+        that is a function of the stable 1-WL colour $\kappa$ (for instance the
+        degree, or $\kappa$ itself). Then LDNA with rank $r$ is bounded by 1-WL.
+  \item[(ii)] Let $r$ be obtained by sorting on any isomorphism-invariant node
+        function (possibly stronger than 1-WL, e.g.\ per-node subgraph counts).
+        Then for any pair of vertex-transitive graphs with
+        $G\sim_{1\text{-WL}}H$, LDNA with rank $r$ cannot distinguish $G$ from
+        $H$.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+\emph{(i).} Since $\iota$ is a function of $\kappa$, and the dense rank
+\cref{eqn:expr-dense-rank} of $\iota$-values divided by the common size is, for
+$G\sim_{1\text{-WL}}H$, a fixed function of $\kappa$ (the multiset of $\kappa$,
+hence of $\iota$, agrees across $G$ and $H$), the gap
+$\delta_{uv}=f(\kappa(u),\kappa(v))$ is determined by the endpoints' stable
+colours. By \cref{prop:delta-charac}, LDNA with $r$ is bounded by
+$1\text{-WL}^r$. We claim $1\text{-WL}^r$ and $1\text{-WL}$ induce the same
+partition. On one hand $1\text{-WL}^r$ refines $1\text{-WL}$. On the other, the
+stable partition $\kappa$ is equitable for $G$, and the added edge colours
+$\delta=f(\kappa(u),\kappa(v))$ are constant on each ordered pair of classes;
+hence for a node in class $C$ the multiset
+$\{\!\{(\kappa(u),e_{uv},\delta_{uv}):u\in N(v)\}\!\}$ is a fixed function of the
+un-augmented multiset $\{\!\{(\kappa(u),e_{uv})\}\!\}$, which is constant across
+$C$. Thus $\kappa$ is equitable for $G^r$ as well, so $1\text{-WL}^r$ does not
+refine $\kappa$ and equals it. To pass from equal partitions to equal
+graph-level histograms, check by induction on $t$ that every $1\text{-WL}^r$
+colour $c_v^{(t),r}$ is the image of $\kappa(v)$ under a map shared by $G$ and
+$H$. Base: $c_v^{(0),r}=x_v$, and $\kappa$ refines the raw feature, so $x_v$ is a
+function of $\kappa(v)$. Step:
+\[
+  c_v^{(t+1),r}=\operatorname{HASH}\!\Big(c_v^{(t),r},\ \{\!\{(c_u^{(t),r},e_{uv},\delta_{uv}):u\in N(v)\}\!\}\Big);
+\]
+by the induction hypothesis and $\delta_{uv}=f(\kappa(u),\kappa(v))$ with $f$
+shared (the dense-rank map is shared, as above), the augmented neighbour multiset
+is a shared-map image of $\mu_v:=\{\!\{(\kappa(u),e_{uv}):u\in N(v)\}\!\}$, and
+$\mu_v$ is itself a fixed function of $\kappa(v)$ because $\kappa$ is equitable;
+hence $c_v^{(t+1),r}$ is a shared function of $\kappa(v)$. Consequently each
+per-round $1\text{-WL}^r$ colour histogram is the image, under a shared map, of
+the corresponding $\kappa$-histogram. The $\kappa$-histograms agree across $G$
+and $H$ (since $G\sim_{1\text{-WL}}H$ fixes every round histogram, including the
+stable one), so the $1\text{-WL}^r$ histograms agree too. Therefore LDNA with
+$r$ distinguishes no pair that 1-WL cannot.
+
+\emph{(ii).} If $\iota$ is isomorphism-invariant and $G$ is vertex-transitive,
+then for any $u,v$ there is an automorphism $\pi$ with $\pi(u)=v$, whence
+$\iota(u)=\iota(v)$; so $\iota$ is constant and all nodes are tied. Then
+$r$ is constant, $\delta_{uv}\equiv 0$ on every edge, and the gate takes the
+single value $g(0)=\mathbf{1}+\operatorname{MLP}_g([0,0,0])$, a constant that
+folds into $\operatorname{post}$. LDNA thereby degenerates to the gate-free model
+of \cref{thm:ldna-lower}; equivalently $G^r=G$ (all $\delta=0$), so by
+\cref{prop:delta-charac} LDNA with $r$ is bounded by 1-WL on this pair and cannot
+distinguish $G\sim_{1\text{-WL}}H$. The classical 1-WL-hard pairs are
+vertex-transitive --- for example the $4\times 4$ rook's graph versus the
+Shrikhande graph, and the circular-skip-link (CSL) family --- so invariant-based
+tie-breaking provably fails on them.
+\end{proof}
+
+\subsection{Canonical rank and strict separation}
+\label{sec:expr-canonical}
+
+The obstruction in \cref{prop:invariant-obstruction} is that an
+isomorphism-invariant rank must respect automorphisms and so ties every orbit.
+Breaking the symmetry requires a rank that is invariant across graphs but not
+across the automorphisms of a single graph --- exactly what a canonical
+labelling provides.
+
+\begin{definition}[Injective canonical rank]
+\label{def:canonical-rank}
+A canonical labelling algorithm assigns to each attributed graph $G$ a bijection
+$\pi_G:V\to\{0,\dots,n-1\}$ so that isomorphic graphs receive identical labelled
+graphs (a canonical form): for every isomorphism $f:G\to H$, relabelling $G$ by
+$\pi_G$ and $H$ by $\pi_H$ yields the same ordered attributed graph. The induced
+canonical rank is $r(v)=\pi_G(v)/n$; it is injective on the nodes of $G$.
+\end{definition}
+
+\begin{remark}[Properties of the canonical rank]
+\label{remark:canonical}
+Three points attach to \cref{def:canonical-rank}.
+\emph{Well-definedness under automorphisms.} A canonizer may choose any
+representative labelling within an automorphism orbit; all such choices give the
+same canonical form, so the end-to-end model output is an exact, deterministic
+graph invariant.
+\emph{Realisation.} The \texttt{position} rank mode implements this exactly when
+the data supply a canonical order by construction (the AST depth-first order of
+\texttt{ogbg-code2}). Alternatively the feature lexsort is completed into a full
+canonization by individualization--refinement \citep{mckay2014nauty}: the lexsort
+is the initial colour classification, colour refinement \emph{is} 1-WL, and what
+is added is a canonical individualization of the remaining ties.
+\emph{Complexity.} Graph canonization has no known polynomial worst-case
+algorithm --- the best bound is quasi-polynomial \citep{babai2016quasipoly} ---
+but is fast in practice on benchmark graph classes \citep{mckay2014nauty}; it is
+a one-time, data-side preprocessing step, in the same pipeline position as the
+existing lexsort.
+\end{remark}
+
+\begin{theorem}[Strictness under canonical rank]
+\label{thm:canon-strict}
+With an injective canonical rank, under minimum degree one, and the \textsf{add}
+readout, LDNA is strictly more expressive than 1-WL.
+\end{theorem}
+
+\begin{proof}
+That $\text{LDNA}\succeq 1\text{-WL}$ is \cref{thm:ldna-lower}, which holds in
+every rank mode. It remains to exhibit a 1-WL-indistinguishable pair that LDNA
+separates.
+
+Let $G_1=C_6$ be the $6$-cycle and $G_2=C_3\sqcup C_3$ two disjoint triangles,
+all node features equal to a single symbol and no edge features. Both are
+$2$-regular on six nodes (so minimum degree one holds) with identical initial
+colours. By induction, at every
+1-WL round all six nodes of either graph share one colour: at round $0$ this is
+the single symbol, and if all nodes share colour $a$ at round $t$, then each
+node's neighbour multiset is $\{\!\{a,a\}\!\}$, so $\operatorname{HASH}$ returns
+one common colour at round $t+1$. The round-$t$ histograms are therefore
+$\{\!\{a_t^{\,(6)}\}\!\}$ for both graphs and agree at every $t$; hence
+$G_1\sim_{1\text{-WL}}G_2$.
+
+A canonizer is free to fix one representative labelling per isomorphism class.
+Choose $\pi(C_6)$ to be the cyclic order (positions $0,1,2,3,4,5$ along the
+cycle) and $\pi(C_3\sqcup C_3)$ to place the two triangles on
+$\{0,1,2\}$ and $\{3,4,5\}$. With $r(v)=\pi(v)/6$, the normalised gaps
+$|\delta|$ over the undirected edges are
+\[
+  C_6:\quad \underbrace{\tfrac16,\tfrac16,\tfrac16,\tfrac16,\tfrac16}_{\text{edges }(0,1),\dots,(4,5)},\ \underbrace{\tfrac56}_{(5,0)}
+  \qquad\Big(\textstyle\sum=\tfrac{10}{6}\Big);
+\]
+\[
+  C_3\sqcup C_3:\quad \underbrace{\tfrac16,\tfrac16}_{(0,1),(1,2)},\ \underbrace{\tfrac26}_{(0,2)},\ \underbrace{\tfrac16,\tfrac16}_{(3,4),(4,5)},\ \underbrace{\tfrac26}_{(3,5)}
+  \qquad\Big(\textstyle\sum=\tfrac{8}{6}\Big).
+\]
+
+Now fix parameters for a single layer on one channel. Take the node encoder to
+output the constant $0$; then $h_v^{(0)}=0$ and the residual, if present,
+contributes $0$ (it is the identity on equal widths). Let
+$\operatorname{pre}\equiv 1$ (a constant map: zero the output-layer weight and set
+its bias to one), so $m_{uv}=1$. Realise the gate $g(\delta)=1+|\delta|$: the
+first layer of $\operatorname{MLP}_g$ selects the $|\delta|$ coordinate of
+$[\delta,|\delta|,\operatorname{sign}\delta]$, the $\mathrm{ReLU}$ leaves it
+unchanged since $|\delta|\ge 0$, and the second layer copies it with weight one.
+Let $\operatorname{post}$ be the two-layer MLP computing the identity on the
+non-negative achievable values (both layers weight one; the intervening
+$\mathrm{ReLU}$ acts as the identity because the values are non-negative). Every
+intermediate value is non-negative, so the block activation acts as the identity
+too (\cref{remark:bn}). Each node then has
+\[
+  h_v'=\sum_{u\in N(v)} g(\delta_{uv})\,m_{uv}=\sum_{u\in N(v)}\big(1+|\delta_{uv}|\big),
+\]
+and, writing $m$ for the number of \emph{undirected} edges (so $E$ contains $2m$
+directed edges), the \textsf{add} readout returns, summing over directed edges
+(each undirected edge in both orientations, with $|\delta_{uv}|=|\delta_{vu}|$),
+\[
+  \text{out}(G)=\sum_{v}\sum_{u\in N(v)}\big(1+|\delta_{uv}|\big)
+  =2m+2\!\!\sum_{\text{undirected }uv}\!\!|\delta_{uv}| .
+\]
+Both graphs have $m=6$ undirected edges, so
+\[
+  \text{out}(C_6)=12+\tfrac{20}{6}=\tfrac{92}{6},
+  \qquad
+  \text{out}(C_3\sqcup C_3)=12+\tfrac{16}{6}=\tfrac{88}{6},
+\]
+which differ. LDNA with this canonical rank therefore distinguishes the
+1-WL-indistinguishable pair $(C_6,\,C_3\sqcup C_3)$, and by \cref{def:expr} it is
+strictly more expressive than 1-WL.
+\end{proof}
+
+The theorem asserts the \emph{existence} of a canonical labelling under which
+LDNA separates the pair; fixing representatives is legitimate precisely because
+a canonizer is a choice of one representative per isomorphism class.
+
+\subsection{Closing remarks}
+\label{sec:expr-closing}
+
+\begin{remark}[The \textsf{gru} readout]
+\label{remark:gru}
+The \textsf{gru} readout runs a recurrent network over the sorted node sequence
+and is order-sensitive. Under the feature sort, the order within a block of tied
+(identical-row) nodes is inherited from the arbitrary input labelling, so on
+graphs with ties the resulting graph function is not permutation-invariant and
+is excluded from the statements above. On tie-free graphs (all rows distinct)
+there is no expressiveness to be gained either: with an injective initial
+colouring, 1-WL is complete after one round. Indeed, the round-$1$ colour of a
+node is $(x_v,\{\!\{x_u:u\in N(v)\}\!\})$; since the features are distinct
+identifiers, matching two graphs' nodes by feature is a bijection, and equal
+round-$1$ colour multisets force equal neighbour-feature sets at every node,
+i.e.\ equal labelled adjacency, hence isomorphism. So any two non-isomorphic
+tie-free graphs are already separated by 1-WL.
+\end{remark}
+
+\begin{remark}[A trilemma]
+\label{remark:trilemma}
+Informally, and as a synthesis of the three results above rather than a separate
+theorem: of the three properties --- deterministic exact invariance,
+individualization beyond 1-WL, and cheap worst-case preprocessing --- a rank
+scheme can secure at most two. Arbitrary or random tie-breaking (random node
+individualization)
+attains the extra expressiveness but is invariant only in distribution
+\citep{abboud2021rni}; invariant tie-breaks keep exact invariance but fail on
+vertex-transitive pairs (\cref{prop:invariant-obstruction}); canonical
+individualization keeps both invariance and expressiveness at the cost of a
+canonization step (\cref{def:canonical-rank}).
+\end{remark}
+
+\begin{remark}[Capacity, not learnability]
+\label{remark:learnability}
+All results above concern representational capacity --- the existence of
+parameters realising a given behaviour. They say nothing about whether such
+parameters are found by optimization, nor about generalization.
+\end{remark}
