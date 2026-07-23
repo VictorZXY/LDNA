@@ -18,7 +18,7 @@ if not getattr(_torch.load, "_ldna_weights_only_patched", False):
     _torch.load = _ldna_torch_load
 # -----------------------------------------------------------------------------
 
-from ._utils import sort_graph, sort_graphs
+from ._utils import add_eig_vec, add_eig_vecs, degree_histogram, sort_graph, sort_graphs
 from .evaluator import ZINCEvaluator
 from .logger import Logger
 from .resolver import evaluator_resolver, loss_resolver, model_and_data_resolver
@@ -26,6 +26,9 @@ from .tee import Tee, tee_to_file
 from .transforms import RemoveEdgeAttr, UnsqueezeTargetDim
 
 __all__ = [
+    'add_eig_vec',
+    'add_eig_vecs',
+    'degree_histogram',
     'sort_graph',
     'sort_graphs',
     'ZINCEvaluator',

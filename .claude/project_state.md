@@ -37,9 +37,18 @@
   `configs/ldna_code2_rankgate.yaml`). Reruns of the rank-gated LDNA with the previously
   tuned shared params: ZINC done, molhiv/molpcba/MNIST in flight, code2 pending a GPU slot.
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
-  and `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
-  `VariancePreservingAggregation`, `sum/√N`). `GIN` xor `GINE` runs per dataset by edge
-  availability (see `.claude/experiments.md` § Baselines).
+  `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
+  `VariancePreservingAggregation`, `sum/√N`), and `DGN` (`models/dgn.py` — a PNA-shaped layer
+  whose aggregator set adds the directional `dirK-av`/`dirK-dx`, weighted by the gradient of
+  the low-frequency Laplacian eigenvectors; `DGNConv` is a custom `MessagePassing(aggr=None)`
+  port of the official DGL code, since PyG has no DGN). `GIN` xor `GINE` runs per dataset by
+  edge availability (see `.claude/experiments.md` § Baselines).
+- DGN is wired for `ZINC`, `ogbg-molhiv`, `ogbg-molpcba` and `MNISTSuperpixels`; `ogbg-code2`
+  is deferred (lazy transform chain would re-run the eigendecomposition every epoch). Its
+  per-node eigenvector field is precomputed by `utils/_utils.py: add_eig_vecs`, attached by the
+  resolver only when the model is `DGN`, and forwarded by `train.py` only when present — so
+  every other baseline's call path is unchanged. Details and the ordering constraints are in
+  `.claude/experiments.md` § Baselines.
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
   sequence-prediction path — `ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a
   guarded fork in `train.py` / `hyperparam_search.py` (per-position CE loss, decode→F1

@@ -1,4 +1,5 @@
 from .deepergcn import DeeperGCN
+from .dgn import DGN, DGNConv
 from .ldna_conv import LDNAConv
 from .ldna_net import LDNA
 from .egc import EGC
@@ -15,6 +16,8 @@ from .code2 import ASTNodeEncoder, Code2Head
 
 __all__ = [
     'DeeperGCN',
+    'DGN',
+    'DGNConv',
     'LDNAConv',
     'LDNA',
     'EGC',

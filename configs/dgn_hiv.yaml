@@ -1,0 +1,44 @@
+experiment_name: dgn_hiv
+
+# Model specific arguments/hyperparameters
+model: DGN
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 6
+  aggregators: [mean, dir1-dx, dir1-av]
+  scalers: [identity, amplification, attenuation]
+  num_eig_vec: 1
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.143105
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ogbg-molhiv
+data_args:
+  root: data/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 150
+  eval_interval: 10
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 6.29547e-05
+    weight_decay: 4.51778e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: OGBGraphPropPredEvaluator
+  evaluator_kwargs:
+    name: ogbg-molhiv
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

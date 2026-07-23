@@ -89,6 +89,45 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 |---|---|---|
 | `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` (`GraphSAGE` = `models/sage.py`, resolver query `GraphSAGE`/`SAGE`) |
 | `GNN-VPA` | done | `models/vpa.py` (`VPA`): GIN/GINE backbone with PyG built-in `VariancePreservingAggregation` (`sum/√N`) via `aggr=`; dual-path (edge datasets→GINEConv, edge-less→GINConv); shared interface. Resolver query `GNN-VPA` |
+| `DGN` | done (4/5 datasets) | `models/dgn.py` (`DGN`, `DGNConv`): PNA-shaped layer whose aggregator set adds the directional `dirK-av` / `dirK-dx`, weighted by the gradient of the graph's low-frequency Laplacian eigenvectors. No PyG built-in exists (`DirGNNConv` is an unrelated paper), so `DGNConv` is a custom `MessagePassing(aggr=None)` port of the official DGL implementation. Resolver query `DGN`. **`ogbg-code2` deferred** — see the note below |
+
+> **DGN's configs use the paper's ZINC aggregator set, not its MolHIV/PCBA one.** All four
+> `dgn_*.yaml` set `aggregators: [mean, dir1-dx, dir1-av]` — the set the official repo ships for
+> ZINC, and the best row on ZINC-simple / MolHIV-simple in the paper's fixed-budget ablation.
+> The reason is comparison hygiene: DGN is PNA plus directionality, and the alternative set
+> (`[mean, max, min, dir1-dx, dir1-av]`, which the code keeps as its default) overlaps this
+> repo's `PNA` baseline (`[mean, min, max, std]`) in three of five aggregators, so the two
+> baselines would largely re-measure each other. With `[mean, dir1-dx, dir1-av]` the overlap is
+> `mean` alone — unavoidable, since the directional weights are a partition of unity (`av`) or
+> sum to ~0 (`dx`), so a purely directional layer would drop the isotropic signal, a
+> configuration the paper never runs. The degree `scalers` stay at all three: they are a
+> per-node gain applied uniformly to whatever aggregators exist, orthogonal to which aggregators
+> those are, and keeping them reproduces the official ZINC config exactly. Side effect: the
+> narrower `post_nn` input (`(3*3+1)*hidden` instead of `(5*3+1)*hidden`) puts DGN at ~0.73x
+> `PNA`'s parameter count and ~3.0x LDNA's, rather than ~1.05x PNA's.
+
+> **DGN needs a precomputed eigenvector field.** `utils/_utils.py: add_eig_vecs` attaches a
+> per-node `eig_vec` to the data, and `train.py` forwards it only when present — the resolver
+> attaches it only for `DGN`, so its presence is the routing switch and the other baselines'
+> call path is untouched. Two ordering constraints are load-bearing: the field is computed
+> **after** `sort_graphs` (the canonical sort permutes nodes without realigning extra per-node
+> attributes, so an earlier attachment desynchronises silently) and, for the OGB datasets,
+> **before** the split slices (an index view cannot be re-collated). Eigenvectors are taken per
+> connected component, as the paper prescribes: on a disconnected graph the whole-graph
+> Laplacian's lowest non-trivial eigenvectors degenerate into component indicators and the
+> directional field vanishes on every edge (7.5% of `ogbg-molhiv` graphs are disconnected, vs
+> 0.2% of `ogbg-molpcba` and none of `ZINC`/`MNISTSuperpixels`). The field costs ~0.9 ms per graph
+> to build and is **cached on disk** as a sidecar `<split>_eig_vec_k<k>.pt` in the dataset's
+> `processed_dir`, so only the first run pays for it. The cache is keyed by a digest of the
+> sorted connectivity, so a revised canonical sort invalidates it automatically — without that
+> guard the field is silently reused against permuted nodes (verified: it survives the shape
+> check and leaves the per-edge field an order of magnitude wrong, with no error). The sidecar
+> deliberately does not rewrite the dataset's own processed cache, which every other model
+> shares. The build loop is pinned to one thread: `eigh` on graph-sized matrices is
+> dominated by BLAS thread-launch overhead, and letting it fan out was ~30x slower in wall clock
+> while starving the machine's other jobs. `ogbg-code2` is deferred because its transform
+> chain is lazy: the eigendecomposition would re-run every epoch (~10 min/epoch, ~25 h per
+> 150-epoch run), so it needs the dataset materialised first.
 
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate

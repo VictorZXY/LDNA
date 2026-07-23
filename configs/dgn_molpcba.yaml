@@ -1,0 +1,44 @@
+experiment_name: dgn_molpcba
+
+# Model specific arguments/hyperparameters
+model: DGN
+model_args:
+  hidden_channels: 1024
+  out_channels: 1024
+  num_layers: 7
+  aggregators: [mean, dir1-dx, dir1-av]
+  scalers: [identity, amplification, attenuation]
+  num_eig_vec: 1
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.103161
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ogbg-molpcba
+data_args:
+  root: data/
+  batch_size: 512
+
+# Training specific arguments/hyperparameters
+cuda: 2
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 3.44116e-05
+    weight_decay: 4.39658e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: OGBGraphPropPredEvaluator
+  evaluator_kwargs:
+    name: ogbg-molpcba
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

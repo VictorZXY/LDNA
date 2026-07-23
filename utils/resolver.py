@@ -3,17 +3,15 @@ import os
 import ogb.graphproppred
 import ogb.nodeproppred
 import pandas as pd
-import torch
 import torch_geometric.transforms as T
 from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from torch import nn
 from torch_geometric.datasets import MNISTSuperpixels, ZINC
 from torch_geometric.loader import DataLoader
-from torch_geometric.utils import degree
 
 import models
-from utils import sort_graphs
+from utils import add_eig_vecs, degree_histogram, sort_graphs
 from utils.code2 import encode_y_to_arr, get_vocab_mapping
 from utils.evaluator import Code2Evaluator, MNISTEvaluator, ZINCEvaluator
 from utils.transforms import AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
@@ -24,7 +22,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     dataset_kwargs = kwargs.get('data_args', {})
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
-    model_choices = ['LDNA', 'DeeperGCN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
+    model_choices = ['LDNA', 'DeeperGCN', 'DGN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
     dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2']
 
     # Load the dataset
@@ -38,6 +36,15 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
 
         train_dataset = sort_graphs(train_dataset, sort_y=False)
         val_dataset = test_dataset = sort_graphs(test_dataset, sort_y=False)
+
+        # Only DGN reads the Laplacian eigenvector field, so it is attached only for DGN and its
+        # presence is what routes it into the model. It is computed AFTER the canonical sort, which
+        # permutes the nodes without realigning any extra per-node attribute, and (for the OGB
+        # datasets below) BEFORE the splits, since an index view cannot be re-collated.
+        if model_query == 'DGN':
+            num_eig_vec = model_kwargs.get('num_eig_vec', 1)
+            train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
+            val_dataset = test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
     elif dataset_query == 'ZINC':
         transform = UnsqueezeTargetDim()
         subset = dataset_kwargs.pop('subset', False)
@@ -48,11 +55,20 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         train_dataset = sort_graphs(train_dataset, sort_y=False)
         val_dataset = sort_graphs(val_dataset, sort_y=False)
         test_dataset = sort_graphs(test_dataset, sort_y=False)
+
+        if model_query == 'DGN':
+            num_eig_vec = model_kwargs.get('num_eig_vec', 1)
+            train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
+            val_dataset = add_eig_vecs(val_dataset, k=num_eig_vec, cache_name='val')
+            test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
     elif dataset_query in ['ogbg-molhiv', 'ogbg-molpcba']:
         dataset = PygGraphPropPredDataset(name=dataset_query, **dataset_kwargs)
         split_idx = dataset.get_idx_split()
 
         dataset = sort_graphs(dataset, sort_y=False)
+        if model_query == 'DGN':
+            dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all')
+
         train_dataset = dataset[split_idx['train']]
         val_dataset = dataset[split_idx['valid']]
         test_dataset = dataset[split_idx['test']]
@@ -150,19 +166,9 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     elif model_query == 'GINE':
         model = models.GINE(**model_kwargs)
     elif model_query == 'PNA':
-        # Compute the maximum in-degree in the training data.
-        max_degree = -1
-        for data in train_dataset:
-            d = degree(data.edge_index[1], num_nodes=data.num_nodes, dtype=torch.long)
-            max_degree = max(max_degree, int(d.max()))
-
-        # Compute the in-degree histogram tensor
-        deg = torch.zeros(max_degree + 1, dtype=torch.long)
-        for data in train_dataset:
-            d = degree(data.edge_index[1], num_nodes=data.num_nodes, dtype=torch.long)
-            deg += torch.bincount(d, minlength=deg.numel())
-
-        model = models.PNA(deg=deg, **model_kwargs)
+        model = models.PNA(deg=degree_histogram(train_dataset), **model_kwargs)
+    elif model_query == 'DGN':
+        model = models.DGN(deg=degree_histogram(train_dataset), **model_kwargs)
     elif model_query in ('GNN-VPA', 'VPA'):
         model = models.VPA(**model_kwargs)
     else:

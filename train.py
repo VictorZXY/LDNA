@@ -14,6 +14,12 @@ from utils import Logger, evaluator_resolver, loss_resolver, model_and_data_reso
 from utils.evaluator import Code2Evaluator
 
 
+def _eig_kwargs(batch):
+    # DGN is the only model that consumes a precomputed Laplacian eigenvector field; the resolver
+    # attaches `eig_vec` to the data only for DGN, so its presence is the switch.
+    return {'eig_vec': batch.eig_vec} if hasattr(batch, 'eig_vec') else {}
+
+
 @torch.no_grad()
 def evaluate(model, loader, evaluator, loss_fn, device):
     model.eval()
@@ -23,7 +29,7 @@ def evaluate(model, loader, evaluator, loss_fn, device):
     total_loss = 0
     for batch in loader:
         batch = batch.to(device)
-        out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+        out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
 
         y_true.append(batch.y)
         y_pred.append(out)
@@ -79,7 +85,7 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
             for batch in train_loader:
                 batch = batch.to(device)
                 optimizer.zero_grad()
-                out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+                out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
                 if isinstance(loss_fn, nn.CrossEntropyLoss):
                     is_labelled = (batch.y == batch.y).view(-1)
                     loss = loss_fn(out[is_labelled], batch.y[is_labelled].long())
