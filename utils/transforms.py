@@ -22,6 +22,15 @@ class AddDepthToX(BaseTransform):
         return data
 
 
+class AddDepthField(BaseTransform):
+    # ogbg-code2 + DGN: the AST depth stands in for the Laplacian eigenvector as the directional
+    # field. Every graph is a tree, so |depth_j - depth_i| = 1 on every symmetrized edge and the
+    # gradient is exactly the parent/child orientation. Reads the raw, unclamped `node_depth`.
+    def forward(self, data):
+        data.eig_vec = data.node_depth.view(-1, 1).to(torch.float)
+        return data
+
+
 class ToUndirectedNoAttr(BaseTransform):
     # ogbg-code2 is edge-less: symmetrize connectivity by adding reverse edges only,
     # without producing any edge features.

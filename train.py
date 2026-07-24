@@ -130,7 +130,7 @@ def _evaluate_code2(model, loader, evaluator, criterion, device):
     total_loss = 0
     for batch in loader:
         batch = batch.to(device)
-        pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+        pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
 
         loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
                    for i in range(len(pred_list))) / len(pred_list)
@@ -173,7 +173,7 @@ def _train_code2(model, train_loader, val_loader, test_loader, train_args, devic
             for batch in train_loader:
                 batch = batch.to(device)
                 optimizer.zero_grad()
-                pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
+                pred_list = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
                 loss = sum(criterion(pred_list[i].float(), batch.y_arr[:, i])
                            for i in range(len(pred_list))) / len(pred_list)
                 loss.backward()

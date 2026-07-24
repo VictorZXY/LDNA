@@ -14,7 +14,7 @@ import models
 from utils import add_eig_vecs, degree_histogram, sort_graphs
 from utils.code2 import encode_y_to_arr, get_vocab_mapping
 from utils.evaluator import Code2Evaluator, MNISTEvaluator, ZINCEvaluator
-from utils.transforms import AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
+from utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
 
 
 def model_and_data_resolver(model_query, dataset_query, **kwargs):
@@ -93,11 +93,22 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # never rewritten: fold node depth into x, symmetrize connectivity without edge features,
         # and attach the encoded target array `y_arr` (the raw `y` token list is kept for the F1
         # evaluator).
-        dataset.transform = T.Compose([
+        transforms = [
             AddDepthToX(),
             ToUndirectedNoAttr(),
             lambda d: encode_y_to_arr(d, vocab2idx, 5),
-        ])
+        ]
+        # Only DGN reads a directional field; here it is the AST depth, which the lazy chain can
+        # carry because it costs a view and a cast (the eigenvector field the other datasets use
+        # would need a sparse solve per graph). Depth is one-dimensional, so unlike `add_eig_vecs`
+        # it cannot honour `num_eig_vec > 1` and the mismatch is rejected here rather than
+        # surfacing as an empty-slice broadcast in the first forward.
+        if model_query == 'DGN':
+            if model_kwargs.get('num_eig_vec', 1) != 1:
+                raise ValueError("Argument `num_eig_vec` must be 1 for DGN on ogbg-code2, whose "
+                                 "directional field is the one-dimensional AST depth")
+            transforms.append(AddDepthField())
+        dataset.transform = T.Compose(transforms)
 
         # No sort_graphs: the AST DFS node order is already canonical, and sorting would desync
         # node_depth and the list-valued target from the nodes.

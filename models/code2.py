@@ -60,6 +60,7 @@ class Code2Head(nn.Module):
         for h in self.heads:
             h.reset_parameters()
 
-    def forward(self, x, edge_index, edge_attr, batch):
-        h = self.backbone(x, edge_index, edge_attr, batch)   # (num_graphs, emb_dim)
-        return [head(h) for head in self.heads]              # list of max_seq_len (num_graphs, num_vocab)
+    def forward(self, x, edge_index, edge_attr, batch, **kwargs):
+        # `kwargs` carries DGN's `eig_vec`; every other backbone is called without it.
+        h = self.backbone(x, edge_index, edge_attr, batch, **kwargs)   # (num_graphs, emb_dim)
+        return [head(h) for head in self.heads]                        # list of max_seq_len (num_graphs, num_vocab)

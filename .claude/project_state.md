@@ -43,12 +43,15 @@
   the low-frequency Laplacian eigenvectors; `DGNConv` is a custom `MessagePassing(aggr=None)`
   port of the official DGL code, since PyG has no DGN). `GIN` xor `GINE` runs per dataset by
   edge availability (see `.claude/experiments.md` § Baselines).
-- DGN is wired for `ZINC`, `ogbg-molhiv`, `ogbg-molpcba` and `MNISTSuperpixels`; `ogbg-code2`
-  is deferred (lazy transform chain would re-run the eigendecomposition every epoch). Its
-  per-node eigenvector field is precomputed by `utils/_utils.py: add_eig_vecs`, attached by the
-  resolver only when the model is `DGN`, and forwarded by `train.py` only when present — so
-  every other baseline's call path is unchanged. Details and the ordering constraints are in
-  `.claude/experiments.md` § Baselines.
+- DGN is wired for all five graph-level datasets. Its per-node directional field is attached by
+  the resolver only when the model is `DGN`, and forwarded by `train.py` only when present, so
+  every other baseline's call path is unchanged. On `ZINC`/`ogbg-molhiv`/`ogbg-molpcba`/
+  `MNISTSuperpixels` the field is the low-frequency Laplacian eigenvectors, precomputed by
+  `utils/_utils.py: add_eig_vecs` (per connected component, single-threaded, disk-cached under a
+  connectivity digest). On `ogbg-code2` it is the AST depth via `utils/transforms.py:
+  AddDepthField` — the graphs are trees, so the depth gradient is the parent/child axis, and it
+  costs a view and a cast instead of a sparse eigensolve. Details, measurements and the rejected
+  alternatives are in `.claude/experiments.md` § Baselines.
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
   sequence-prediction path — `ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a
   guarded fork in `train.py` / `hyperparam_search.py` (per-position CE loss, decode→F1

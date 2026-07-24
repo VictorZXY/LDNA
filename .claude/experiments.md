@@ -89,7 +89,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 |---|---|---|
 | `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` (`GraphSAGE` = `models/sage.py`, resolver query `GraphSAGE`/`SAGE`) |
 | `GNN-VPA` | done | `models/vpa.py` (`VPA`): GIN/GINE backbone with PyG built-in `VariancePreservingAggregation` (`sum/√N`) via `aggr=`; dual-path (edge datasets→GINEConv, edge-less→GINConv); shared interface. Resolver query `GNN-VPA` |
-| `DGN` | done (4/5 datasets) | `models/dgn.py` (`DGN`, `DGNConv`): PNA-shaped layer whose aggregator set adds the directional `dirK-av` / `dirK-dx`, weighted by the gradient of the graph's low-frequency Laplacian eigenvectors. No PyG built-in exists (`DirGNNConv` is an unrelated paper), so `DGNConv` is a custom `MessagePassing(aggr=None)` port of the official DGL implementation. Resolver query `DGN`. **`ogbg-code2` deferred** — see the note below |
+| `DGN` | done | `models/dgn.py` (`DGN`, `DGNConv`): PNA-shaped layer whose aggregator set adds the directional `dirK-av` / `dirK-dx`, weighted by the gradient of a per-node scalar field. No PyG built-in exists (`DirGNNConv` is an unrelated paper), so `DGNConv` is a custom `MessagePassing(aggr=None)` port of the official DGL implementation. Resolver query `DGN`. The field is the low-frequency Laplacian eigenvectors on the four molecular/image datasets and the AST depth on `ogbg-code2` — see the two notes below |
 
 > **DGN's configs use the paper's ZINC aggregator set, not its MolHIV/PCBA one.** All four
 > `dgn_*.yaml` set `aggregators: [mean, dir1-dx, dir1-av]` — the set the official repo ships for
@@ -125,9 +125,49 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > deliberately does not rewrite the dataset's own processed cache, which every other model
 > shares. The build loop is pinned to one thread: `eigh` on graph-sized matrices is
 > dominated by BLAS thread-launch overhead, and letting it fan out was ~30x slower in wall clock
-> while starving the machine's other jobs. `ogbg-code2` is deferred because its transform
-> chain is lazy: the eigendecomposition would re-run every epoch (~10 min/epoch, ~25 h per
-> 150-epoch run), so it needs the dataset materialised first.
+> while starving the machine's other jobs. This whole path applies to the four
+> molecular/image datasets only; `ogbg-code2` uses the depth field below instead.
+
+> **DGN on `ogbg-code2` uses the AST depth, not eigenvectors.** The paper substitutes a
+> domain-provided field when eigenvectors are unusable (it used image coordinates for CIFAR10,
+> whose grid symmetry makes λ₁ degenerate). Every code2 graph is a tree (measured: `num_edges ==
+> num_nodes - 1` for all 452,741), so on the symmetrized edge set `|depth_j − depth_i| = 1`
+> everywhere and the field's gradient is exactly the parent/child orientation — after
+> `ToUndirectedNoAttr`, `dir1-dx` is the only aggregator in the code2 lineup that can tell a
+> message from the parent apart from one from a child. `utils/transforms.py: AddDepthField`
+> attaches it inside the existing lazy chain (a view and a cast, so no precompute and no cache),
+> gated on `model_query == 'DGN'`; `Code2Head.forward` and the two code2 call sites in `train.py`
+> forward it. The eigenvector alternative was measured and rejected: it is *feasible* (sparse
+> shift-invert, ~13 min one-time) but needs four settings whose failure modes are all silent
+> (`which='SA'` converges to the wrong eigenpair at the tolerances the official DGN code uses;
+> `sigma=0` exactly makes `splu` fail; an unfixed ARPACK `v0` makes the field depend on how many
+> solves preceded it; float32 loses precision above ~800 nodes), plus a full materialization of
+> the one dataset the resolver never materializes — and it is not more faithful anyway, since
+> λ₁ is degenerate on 0.8–1.3% of code2 graphs versus zero on the datasets DGN validated on
+> (99.76% of ASTs have a nontrivial subtree-swap automorphism). Config: `[mean, dir1-dx]` —
+> `dir1-av` is dropped because with a ±1 field it is provably the `mean` block (measured
+> agreement to ~3 float32 ulps). `node_dfs_order` was rejected as a second field: it equals
+> `arange(n)`, i.e. the positional signal only `LDNA` consumes via `rank_mode: position`, and no
+> other baseline can see it. One direction is the right count for a tree — an AST has a single
+> canonical axis, where CIFAR10's two came from an image having two coordinates.
+>
+> Three consequences of the substitution, recorded as decisions rather than left implicit.
+> (1) **`dir-dx` keeps its `.abs()`**, although the reason for that absolute value — folding away
+> an eigenvector's arbitrary sign — does not apply to depth, whose sign is canonical (it grows
+> away from the root). Measured cost: 50.1% of the pre-`abs` entries are negative and
+> `corr(|signed|, signed) = −0.007`, so the fold is not close to a no-op; child-dominant and
+> parent-dominant nodes become indistinguishable. It is kept because `DGNConv` then stays the
+> aggregator we verified against the reference to 0.0 error, and because the paper's own
+> `dirK-dx-no-abs` variant was never benchmarked ("only B_dx and B_av are tested empirically") —
+> a second deviation stacked on the field substitution would be harder to defend than a slightly
+> weaker baseline. (2) **DGN runs 2 aggregators on code2 and 3 elsewhere**, so it carries
+> 12.05M parameters against PNA's 14.34M. That is *less* of a gap than the other datasets, where
+> dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below. (3) The code2 fork
+> in `hyperparam_search.py` was deliberately **not** given the `_eig_kwargs` guard that
+> `train.py`'s got: the search builds the hardcoded string `'LDNA'` at both call sites and has no
+> `--model` flag, so DGN is unreachable there, and the resolver would not attach `eig_vec` for a
+> non-DGN query anyway. If the search is ever parameterized by model, it fails loudly at the
+> first forward (`ValueError: Argument 'eig_vec' must be given ...`), not silently.
 
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
