@@ -162,12 +162,13 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > a second deviation stacked on the field substitution would be harder to defend than a slightly
 > weaker baseline. (2) **DGN runs 2 aggregators on code2 and 3 elsewhere**, so it carries
 > 12.05M parameters against PNA's 14.34M. That is *less* of a gap than the other datasets, where
-> dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below. (3) The code2 fork
-> in `hyperparam_search.py` was deliberately **not** given the `_eig_kwargs` guard that
-> `train.py`'s got: the search builds the hardcoded string `'LDNA'` at both call sites and has no
-> `--model` flag, so DGN is unreachable there, and the resolver would not attach `eig_vec` for a
-> non-DGN query anyway. If the search is ever parameterized by model, it fails loudly at the
-> first forward (`ValueError: Argument 'eig_vec' must be given ...`), not silently.
+> dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below. (3) **`hyperparam_search.py` gets no
+> `_eig_kwargs` guard at any of its four model call sites** — not the two in its code2 fork and
+> not the two in its standard path. This is a property of the whole script, not a code2
+> asymmetry: it builds the hardcoded string `'LDNA'` at both resolver calls and has no `--model`
+> flag, so DGN is unreachable there and the resolver would not attach `eig_vec` for a non-DGN
+> query anyway. If the search is ever parameterized by model, it fails loudly at the first
+> forward (`ValueError: Argument 'eig_vec' must be given ...`), not silently.
 
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
