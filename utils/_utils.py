@@ -87,7 +87,11 @@ def add_eig_vecs(dataset: InMemoryDataset, k=1, cache_name=None):
     cache_path = None if cache_name is None else \
         os.path.join(dataset.processed_dir, f'{cache_name}_eig_vec_k{k}.pt')
     cache = torch.load(cache_path) if cache_path is not None and os.path.exists(cache_path) else None
-    eig_vecs = cache['eig_vec'] if cache is not None and cache['digest'] == digest.hexdigest() else None
+    # A cache is only usable if it is the current dict format with a matching digest; anything else
+    # (a stale bare-tensor cache from an older format, a corrupt file) falls through to recompute
+    # rather than raising, since the cache is a discardable accelerator, not a source of truth.
+    valid_cache = isinstance(cache, dict) and cache.get('digest') == digest.hexdigest()
+    eig_vecs = cache['eig_vec'] if valid_cache else None
 
     if eig_vecs is None or eig_vecs.shape != (sum(num_nodes), k):
         # `eigh` on graph-sized matrices is dominated by BLAS thread-launch overhead, so the loop
