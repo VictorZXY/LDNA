@@ -41,6 +41,73 @@ def sort_graphs(dataset: InMemoryDataset, sort_y=False):
     return dataset
 
 
+def canonicalize_graph(graph: Data, sort_y=False):
+    # Individualizing canonical node order for datasets whose features cannot impose one (EXP/CEXP,
+    # BREC: 1-WL-hard, essentially featureless — sort_graph's lexicographic sort ties every node).
+    # A nauty canonical labelling relabels the graph into a fixed, reproducible order that is
+    # identical for isomorphic graphs (exact permutation invariance) and, unlike the feature
+    # lexsort, individualizes ties so every node receives a distinct position. LDNA reads the order
+    # via rank_mode='position'. Bookkeeping mirrors sort_graph, so the two are interchangeable.
+    import pynauty  # optional heavy dependency; only imported where a canonical labelling is needed
+
+    n = graph.num_nodes
+
+    # nauty wants an undirected simple adjacency; PyG stores both directions, so symmetrize, drop
+    # any self-loops, and dedupe into per-vertex neighbor lists.
+    adjacency = {i: set() for i in range(n)}
+    src, dst = graph.edge_index.tolist()
+    for a, b in zip(src, dst):
+        if a != b:
+            adjacency[a].add(b)
+            adjacency[b].add(a)
+    adjacency = {i: sorted(neighbors) for i, neighbors in adjacency.items()}
+
+    # Ordered color partition from the feature rows, so the labelling refines the features instead
+    # of ignoring them. The partition order is significant to nauty, so the color classes are taken
+    # in lexicographic feature-row order — itself permutation-invariant — which keeps the resulting
+    # labelling isomorphism-invariant. No features (x is None) leaves the graph uncolored.
+    vertex_coloring = []
+    if graph.x is not None:
+        rows = [tuple(row) for row in graph.x.tolist()]
+        cells = {row: set() for row in rows}
+        for node, row in enumerate(rows):
+            cells[row].add(node)
+        vertex_coloring = [cells[row] for row in sorted(cells)]
+
+    # canon_label returns new2old (the old vertex placed at each canonical position; empirically
+    # verified to be this direction, not its inverse), matching sort_graph's new2old.
+    canon = pynauty.canon_label(pynauty.Graph(n, False, adjacency, vertex_coloring))
+    sorted_idx = torch.as_tensor(canon).long()
+    inv_sorted_idx = torch.empty_like(sorted_idx)
+    inv_sorted_idx[sorted_idx] = torch.arange(sorted_idx.shape[0])
+
+    graph.new2old = sorted_idx
+    graph.old2new = inv_sorted_idx
+
+    # Sort the nodes
+    if graph.x is not None:
+        graph.x = graph.x[graph.new2old]
+    if sort_y:
+        graph.y = graph.y[graph.new2old]
+    graph.edge_index = graph.old2new[graph.edge_index]
+
+    # Sort the edge indices and attributes
+    if hasattr(graph, 'edge_attr'):
+        graph.edge_index, graph.edge_attr = sort_edge_index(graph.edge_index, graph.edge_attr)
+    else:
+        graph.edge_index = sort_edge_index(graph.edge_index)
+
+    return graph
+
+
+def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False):
+    all_graphs = [dataset.get(i) for i in range(len(dataset))]
+    canon_graphs = [canonicalize_graph(g, sort_y) for g in all_graphs]
+
+    dataset.data, dataset.slices = dataset.collate(canon_graphs)
+    return dataset
+
+
 def add_eig_vec(graph: Data, k=1):
     # DGN's directional aggregators need the k lowest-frequency non-trivial eigenvectors of the
     # combinatorial Laplacian L = D - A. PyG's AddLaplacianEigenvectorPE is deliberately not used:
