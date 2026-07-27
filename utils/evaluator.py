@@ -42,6 +42,31 @@ class MNISTEvaluator:
         return {self.eval_metric: total_acc / len(y_true)}
 
 
+class AccuracyEvaluator:
+    # Generic argmax accuracy for single-label graph classification (EXP/CEXP). Mirrors
+    # MNISTEvaluator's interface but is kept separate so each dataset keeps its own evaluator entry.
+    def __init__(self, **kwargs):
+        self.eval_metric = 'acc'
+
+    def eval(self, input_dict):
+        if not 'y_true' in input_dict:
+            raise RuntimeError("Missing key of y_true")
+        if not 'y_pred' in input_dict:
+            raise RuntimeError("Missing key of y_pred")
+
+        y_true, y_pred = input_dict['y_true'], input_dict['y_pred']
+
+        """
+            y_true: numpy ndarray or torch tensor of shape (num_graphs)
+            y_pred: numpy ndarray or torch tensor of shape (num_graphs, num_classes)
+        """
+
+        y_pred = y_pred.argmax(dim=1)
+        total_acc = y_pred.eq(y_true).sum().item()
+
+        return {self.eval_metric: total_acc / len(y_true)}
+
+
 class ZINCEvaluator:
     def __init__(self, **kwargs):
         self.eval_metric = 'mae'

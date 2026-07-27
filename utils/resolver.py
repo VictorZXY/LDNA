@@ -3,6 +3,7 @@ import os
 import ogb.graphproppred
 import ogb.nodeproppred
 import pandas as pd
+import torch
 import torch_geometric.transforms as T
 from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
@@ -11,10 +12,41 @@ from torch_geometric.datasets import MNISTSuperpixels, ZINC
 from torch_geometric.loader import DataLoader
 
 import models
-from utils import add_eig_vecs, degree_histogram, sort_graphs
+from utils import add_eig_vecs, canonicalize_graphs, degree_histogram, sort_graphs
 from utils.code2 import encode_y_to_arr, get_vocab_mapping
-from utils.evaluator import Code2Evaluator, MNISTEvaluator, ZINCEvaluator
+from utils.evaluator import AccuracyEvaluator, Code2Evaluator, MNISTEvaluator, ZINCEvaluator
+from utils.exp import PlanarSATPairsDataset
 from utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
+
+
+def _planar_cv_folds(dataset, batch_size, num_folds=10):
+    # 10-fold CV loaders for EXP/CEXP, transcribed from the GNN-RNI reference (GNNHyb.py). The
+    # dataset is left UNSHUFFLED so each 1-WL-indistinguishable (2i, 2i+1) pair stays intact, and
+    # every fold is a contiguous block. For fold i: the test set is the i-th block of
+    # len(dataset)//num_folds graphs; the remaining graphs form the training pool; the validation
+    # set is the i-th block of len(pool)//num_folds graphs carved from that pool; the rest is the
+    # training set. The reference used uint8 masks, which PyG 2.7 no longer accepts as an index, so
+    # the masks are torch.bool and are inverted with ~ — the resulting partition is identical.
+    folds = []
+    n = len(dataset) // num_folds
+    for i in range(num_folds):
+        test_mask = torch.zeros(len(dataset), dtype=torch.bool)
+        test_mask[i * n:(i + 1) * n] = True
+        test_dataset = dataset[test_mask]
+        train_dataset = dataset[~test_mask]
+
+        m = len(train_dataset) // num_folds
+        val_mask = torch.zeros(len(train_dataset), dtype=torch.bool)
+        val_mask[i * m:(i + 1) * m] = True
+        val_dataset = train_dataset[val_mask]
+        train_dataset = train_dataset[~val_mask]
+
+        folds.append((
+            DataLoader(train_dataset, batch_size=batch_size, shuffle=True),
+            DataLoader(val_dataset, batch_size=batch_size, shuffle=False),
+            DataLoader(test_dataset, batch_size=batch_size, shuffle=False),
+        ))
+    return folds
 
 
 def model_and_data_resolver(model_query, dataset_query, **kwargs):
@@ -23,7 +55,7 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
     model_choices = ['LDNA', 'DeeperGCN', 'DGN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
-    dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2']
+    dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2', 'EXP', 'CEXP']
 
     # Load the dataset
     if dataset_query == 'MNISTSuperpixels':
@@ -115,13 +147,35 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         train_dataset = dataset[split_idx['train']]
         val_dataset = dataset[split_idx['valid']]
         test_dataset = dataset[split_idx['test']]
+    elif dataset_query in ['EXP', 'CEXP']:
+        # Edge-less expressiveness datasets. The node features (a binary node-type column) cannot
+        # impose an order, so the permutation-invariance device is a nauty canonical labelling
+        # (canonicalize_graphs) instead of the feature lexsort; LDNA reads that order via
+        # rank_mode='position'. As with the OGB branches, the DGN directional field is attached
+        # AFTER the canonical order (which permutes the nodes) and BEFORE any index slicing (an
+        # index view cannot be re-collated).
+        dataset = PlanarSATPairsDataset(**dataset_kwargs)
+        dataset = canonicalize_graphs(dataset)
+        if model_query == 'DGN':
+            dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all')
+
+        # The paper's 10-fold CV: one (train, val, test) loader triple per fold. Fold 0 is exposed
+        # as the normal return values and the full list rides on the returned train_loader, from
+        # which train.py selects cv_folds[run] per run (folds map one-to-one to runs).
+        cv_folds = _planar_cv_folds(dataset, batch_size)
+        train_dataset = cv_folds[0][0].dataset
     else:
         raise ValueError(f"Could not resolve dataset '{dataset_query}' among choices {dataset_choices}")
 
-    # Split the dataset into train/val/test dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # Split the dataset into train/val/test dataloaders. EXP/CEXP instead reuse the 10-fold CV
+    # loaders built above, returning fold 0 and carrying the full fold list on the train_loader.
+    if dataset_query in ['EXP', 'CEXP']:
+        train_loader, val_loader, test_loader = cv_folds[0]
+        train_loader.cv_folds = cv_folds
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # Update model kwargs. The node/edge encoders map to the model width, so every conv is
     # hidden -> hidden (uniform width across all models) and residual skips are identity.
@@ -155,6 +209,14 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'in_channels': embedding_dim,
             'node_encoder': models.ASTNodeEncoder(embedding_dim, num_nodetypes, num_nodeattributes, max_depth=20),
             'num_pred_heads': None
+        })
+    elif dataset_query in ['EXP', 'CEXP']:
+        # Edge-less: no edge_dim / edge_encoder. The single node-type column takes values {0, 1}, so
+        # the encoder has two embeddings over one feature; the head has two classes (binary label).
+        model_kwargs.update({
+            'in_channels': embedding_dim,
+            'node_encoder': models.Encoder(2, embedding_dim=embedding_dim, num_features=1),
+            'num_pred_heads': 2
         })
 
     # Load the model
@@ -211,6 +273,7 @@ def evaluator_resolver(query, **kwargs):
         'OGBGraphPropPredEvaluator': ogb.graphproppred.Evaluator,
         'ZINCEvaluator': ZINCEvaluator,
         'MNISTEvaluator': MNISTEvaluator,
+        'AccuracyEvaluator': AccuracyEvaluator,
         'Code2Evaluator': Code2Evaluator,
     }
 

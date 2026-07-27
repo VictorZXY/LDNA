@@ -69,7 +69,16 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
     logger = Logger(train_args['runs'], eval_metric)
     run_times = []
 
+    # EXP/CEXP 10-fold CV: the resolver rides the per-fold (train, val, test) loader triples on the
+    # train_loader, and each run trains on its own fold (folds map one-to-one to runs).
+    cv_folds = getattr(train_loader, 'cv_folds', None)
+    if cv_folds is not None and train_args['runs'] != len(cv_folds):
+        raise ValueError(f"train_args['runs'] ({train_args['runs']}) must equal the number of "
+                         f"CV folds ({len(cv_folds)})")
+
     for run in range(train_args['runs']):
+        if cv_folds is not None:
+            train_loader, val_loader, test_loader = cv_folds[run]
         start_time = time.time()
         model.reset_parameters()
 

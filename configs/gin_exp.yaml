@@ -1,0 +1,43 @@
+experiment_name: gin_exp
+
+# Model specific arguments/hyperparameters
+model: GIN
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_trans_layers: 1
+  num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
+  dropout: 0.0
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: EXP
+data_args:
+  root: data/EXP/
+  batch_size: 20
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 0
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+    factor: 0.7
+    patience: 5
+    min_lr: 1.0e-3
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

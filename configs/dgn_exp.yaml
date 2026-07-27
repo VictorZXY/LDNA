@@ -1,0 +1,45 @@
+experiment_name: dgn_exp
+
+# Model specific arguments/hyperparameters
+model: DGN
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  aggregators: [mean, dir1-dx, dir1-av]
+  scalers: [identity, amplification, attenuation]
+  num_eig_vec: 1
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.0
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: EXP
+data_args:
+  root: data/EXP/
+  batch_size: 20
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 0
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+    factor: 0.7
+    patience: 5
+    min_lr: 1.0e-3
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
