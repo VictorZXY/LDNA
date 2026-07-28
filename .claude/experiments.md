@@ -588,8 +588,11 @@ finished fold-10 rerun — see § Results log.)
       BREC-only, NOT an escalation** — no propagation to graph-level or node-level configs.
       **Pre-committed probe protocol:** σ ∈ {0.001, 0.01, 0.1}; per-category pair cap 20
       (120 pairs spanning all six families); protocol seeds {100, 200, 300}; deciding metric =
-      mean reliability-clean correct; ties → the smaller σ. Zero-init baseline on the same 120
-      pairs is read from the committed `ldna_brec_results.json` correct_lists (no rerun). Full
+      mean reliability-clean correct; ties → the smaller σ. Zero-init baseline = a fourth
+      **σ = 0.0 arm under the same capped protocol** — the committed correct_lists cannot
+      substitute: a pair's init is its position in the seed's reset stream, and the per-category
+      cap shifts every non-Basic pair's position, so the full run's per-pair outcomes do not
+      transfer to the capped run. Full
       run at the chosen σ: 400 pairs × 10 seeds (`ldna_brec_gateinit.yaml`), reported
       **alongside** (not replacing) the committed zero-init 122.8. Disclosure: the gate draw
       shifts the RNG stream for every module reset after it, so gate-init vs zero-init at a fixed

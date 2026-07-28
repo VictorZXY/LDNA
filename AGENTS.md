@@ -83,6 +83,8 @@ Important architecture notes:
 ## Configuration
 
 - Experiments are configured through YAML files in `configs/`.
+- YAML float literals: PyYAML (YAML 1.1) parses `1e-1`, `1e1`, and `1.0e1` as **strings** — write
+  floats with a dot mantissa and a signed exponent (`1.0e-3`) or as plain decimals (`0.1`).
 - Top-level fields: `experiment_name`, `model`, `model_args`, `dataset`, `data_args`, `train_args`, `checkpoint_dir`, `log_dir`, plus `cuda` and `seed`.
 - `train_args` holds the training-loop settings: `runs`, `epochs`, `eval_interval`, `loss_fn`, `optimizer` (+ `optimizer_kwargs`), `scheduler` (+ `scheduler_kwargs`), and `evaluator` (+ `evaluator_kwargs`).
 

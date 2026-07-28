@@ -150,7 +150,8 @@ def evaluate(model, dataset, device, seed=SEED, s_epsilon=True, pair_limit=0):
     for part_name, (part_start, part_end) in PART_DICT.items():
         # The cap is per category, so a small pair_limit still spans all six families instead of
         # collapsing to a prefix of Basic — a probe must see the families a knob is meant to move.
-        if pair_limit:
+        # (> 0, not truthiness: a negative cap would otherwise yield negative per-category totals.)
+        if pair_limit > 0:
             part_end = min(part_end, part_start + pair_limit)
 
         cnt_part = 0
