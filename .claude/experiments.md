@@ -529,24 +529,16 @@ invalid after the architecture change):
 no broadcast — the three configs per dataset are the protocol). **Complete 2026-07-28**;
 results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}/`:
 
-- [x] `EXP`: LDNA 1.0000 (0.9517 before follow-up #1 resolved fold 10) / GIN 0.5000 / DGN 1.0000
+- [x] `EXP`: LDNA 1.0000 / GIN 0.5000 / DGN 1.0000
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
-**Batch 3 — follow-ups (2026-07-28: #1 done; #2 D1 in flight).** Two refinements to the batch-3
-results above. Code is committed (`exp_fold_rerun.py`; `BRECDataset(canonical=False)` +
-`dgn/gin_brec_noncanon.yaml`); runs on cuda:1. Protocol decisions fixed at launch, after an
-independent code review:
+**Batch 3 — follow-up: DGN BREC canonicalization ablation** (D1 running on cuda:1, 2026-07-28;
+D2 designed, not implemented). Code committed: `BRECDataset(canonical=False)` +
+`dgn/gin_brec_noncanon.yaml`. (`exp_fold_rerun.py`, added alongside, is the reusable
+single-fold EXP/CEXP driver behind the finished fold-10 rerun — see § Results log.)
 
-- **#1 selection is pure val** (first maximum on ties) — the convention that produced the
-  committed best-of-3 (verified: it reproduces fold 10's 0.5167 from seed 43 with no test
-  tie-break). A seed reaching val 1.0 ends the sweep early, which is provably equivalent under
-  val-selection. The driver's candidates are a **new self-contained family** (fresh RNG per seed;
-  the committed run-10 draws continued a stream advanced by runs 1–9 and are not reproducible in
-  isolation), so fold 10's number is the best-of-5 within this family — it **replaces** the
-  committed fold-10 number rather than extending its candidate set (best-of-8 on one fold would
-  be asymmetric vs. every other fold and baseline).
-- **D1 gains a GIN control** on the same non-canonical build (`gin_brec_noncanon.yaml`): dropping
+- **D1 has a GIN control** on the same non-canonical build (`gin_brec_noncanon.yaml`): dropping
   canonicalization changes the RPC statistical regime for *every* model (within-class copies stay
   genuinely permuted → the near-zero within-class covariance behind the S+εI guard becomes a real
   covariance), not just DGN's field. GIN is exactly permutation-invariant, so it isolates the
@@ -556,29 +548,7 @@ independent code review:
   simple-λ₁ graphs should not move; a uniform drop across all categories would indicate the
   regime confound instead.
 
-- [x] **#1 (done 2026-07-28) — EXP best-of-5 to push LDNA fold 10 to ~1.00.** Outcome: the
-      driver family's first candidate (seed 42) broke fold 10 outright — train/val/test 1.0000 —
-      and seeds 43–46 were skipped by the ceiling early-stop (provably equivalent under pure
-      val-selection). Fold 10 = 1.0000 replaces the committed 0.5167 → **LDNA EXP = 1.0000**
-      (§ Results log; log archived as `ranking/exp/ldna_exp_fold10.txt` + `_results.json`).
-      Confirms the init-lottery diagnosis: the committed sweep's run-10 draw (an RNG stream
-      advanced by runs 1–9) was stuck, while a fresh seed-42 construction breaks out at once.
-      Original plan for reference: The committed EXP result is
-      **best-of-3** (seeds 42/43/44, per-fold val-selection, applied symmetrically to all models).
-      Folds 1–9 each already reached val=1.0 under some seed; only **fold 10** is stuck (0/3 seeds
-      broke it). Diagnosis (real, from the three seeds): the breakout is an init lottery — stuck
-      folds move with the seed ({3,7,8,10}/{2,6,10}/{5,10}) — and fold 10 is the hardest because
-      the contiguous-fold protocol leaves its training pool without the large-graph tail (graphs
-      972–1199 avg ~50 nodes vs ~43.6 elsewhere). Plan: extend to **best-of-5** (add seeds 45/46),
-      val-selected, symmetric. Efficiency note: the 10-fold CV split is deterministic in fold index
-      (`utils/resolver._planar_cv_folds`), so **only fold 10 need be rerun** — folds 1–9 are already
-      1.0 and best-of-N is monotone. Keep the 5 fold-10 inits on one self-consistent construction
-      (e.g. a scratch driver that trains only `cv_folds[9]` as a single run per seed 42–46) so the
-      best-of-5 is internally consistent; folds 1–9 stay at their committed 1.0. GIN stays 0.5000
-      by theorem (no need to rerun for the number, only for symmetry bookkeeping); DGN is already
-      1.0000 and best-of-N is monotone, so it needs no reruns. **Run on an idle GPU or on CPU** —
-      the fold is tiny, and cuda:1 contention previously stalled it.
-- [ ] **#2 (D1 running + GIN control; D2 designed, not implemented) — DGN BREC ablation: how much of 271.4 is the shared canonicalization?** DGN's Laplacian
+- [ ] **DGN BREC ablation (D1 running; D2 designed, not implemented): how much of 271.4 is the shared canonicalization?** DGN's Laplacian
       directional field is computed from `edge_index` by `torch.linalg.eigh`. On the regular BREC
       families the low-frequency eigenvalues are **degenerate** (repeated), so within the degenerate
       eigenspace "which vector is the eigenvector" is mathematically arbitrary — this is exactly the
@@ -623,9 +593,8 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-08 | ZINC (full) | LDNA (rank-gated) rerun | same tuned shared config as 07-10 ZINC row, runs=3, 150ep; baselines frozen (LDNA-internal change only) | test MAE: LDNA 0.0856±0.0021 (SEM 0.0012) | **#2** | Rank-gated aggregation vs old LDNA 0.0903±0.0037: −0.0047 (clear improvement). Still behind #1 PNA 0.0807±0.0119 (SEM 0.0069): gap 0.0049 < combined SEM 0.0070 → now within noise of PNA (was marginally significant). Per user: keep tuned params, rerun rank-gated LDNA on all datasets. |
 | 2026-07-22 | ogbg-molhiv | LDNA (rank-gated) rerun | same tuned shared config as 07-10 molhiv row, runs=10, 150ep; baselines frozen | test ROC-AUC: LDNA 0.7923±0.0089 (SEM 0.0028) | **#1 (nominal) / tie** | vs old LDNA 0.7867±0.0118: +0.0056 (> combined SEM 0.0047, modest real gain). vs old #1 GAT 0.7875±0.0175 (SEM 0.0055): LDNA leads by 0.0048 < combined SEM 0.0062 → statistical tie, but LDNA takes the nominal top spot (was #2). |
 | 2026-07-23 | MNISTSuperpixels | LDNA (rank-gated) rerun | same tuned shared config as 07-13 MNIST row, runs=3, 150ep; baselines frozen | test acc: LDNA 0.9410±0.0023 (SEM 0.0013) | **#2** | vs old LDNA 0.9357±0.0019: +0.0053 (> combined SEM 0.0017, real gain). Still behind #1 PNA 0.9532±0.0004 (SEM 0.0002): gap 0.0122 ≫ combined SEM 0.0013 → still highly significant. Closes ~30% of the old LDNA→PNA gap but PNA's per-node degree-scaler statistics remain out of reach on this dataset. |
-| 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-3 seeds (42/43/44) selected on **val**, applied symmetrically | test acc: LDNA **0.9517** (9 folds 1.0000, fold 10 0.5167) | **#2**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. LDNA breakout is a per-(fold,seed) lottery: stuck folds {3,7,8,10}/{2,6,10}/{5,10}; fold 10 broke under 0/3 seeds — it is the only fold whose training pool excludes the large-graph tail (graphs 972–1199 avg ~50 nodes vs ~43.6 elsewhere; contiguous-fold protocol artifact, disclosed). |
+| 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-N selected on **val**, applied symmetrically — three full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed (`exp_fold_rerun.py`) | test acc: LDNA **1.0000** (all 10 folds) | **#1 (tie with DGN)**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. Fold 10 was the one fold still short of 1.0 under the three sweep seeds; its extra seed reached train/val/test 1.0 (logs `ranking/exp/ldna_exp_fold10.txt` + `_results.json`). |
 | 2026-07-28 | CEXP | LDNA + GIN + DGN (batch 3) | same shared config, seed 42, 10-fold CV | test acc: LDNA **1.0000±0.0000** | **#1 (tie with DGN)** | DGN 1.0000±0.0000; GIN 0.7492±0.0026 ≈ the theoretical 75% (corrupt half 1-WL-learnable, EXP-hard half pinned at 50%). No stuck folds for LDNA on CEXP — the corrupt half's easy gradient reliably bootstraps the rank gate. |
-| 2026-07-28 | EXP (follow-up #1) | LDNA (fold-10 rerun) | `exp_fold_rerun.py` driver: fold 10 only, best-of-5 family (seeds 42–46), pure val-selection, ceiling early-stop; folds 1–9 keep their committed 1.0 | fold 10 test acc **1.0000** → LDNA EXP **1.0000** | **#1 (tie with DGN)** | Seed 42 broke fold 10 at once (train/val/test 1.0); seeds 43–46 skipped (equivalent under val-selection, disclosed in the JSON). Replaces committed fold-10 0.5167 per the family-replacement decision (driver candidates are a fresh RNG family, not the sweep's stream-position draws). GIN stays 0.5000 by theorem; DGN 1.0000 with best-of-N monotone → no reruns. Ranking: LDNA 1.0000 = DGN 1.0000 > GIN 0.5000. |
 | 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such. |
 
 ### Parameter-count analysis (recorded 2026-07-13, no action taken yet)

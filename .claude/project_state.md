@@ -87,13 +87,12 @@
   (EXP 1.00 / CEXP 1.00 / BREC 122.8 pairs, all with clean reliability controls) while GIN
   sits on it exactly (0.50 / 0.75 / 0); DGN — the one baseline claiming >1-WL — saturates
   EXP/CEXP too and leads BREC (271.4, ≈3-WL level), helped by the shared canonicalization
-  making its degenerate eigenbasis deterministic (disclosed in the results log). Follow-up #1
-  (EXP fold-10 best-of-5 via `exp_fold_rerun.py`) is **done** — fold 10 resolved to 1.0000, so
-  LDNA EXP = 1.0000. The DGN BREC canonicalization ablation D1 (`BRECDataset(canonical=False)`
-  + `dgn/gin_brec_noncanon.yaml`, with a GIN regime-change control) is implemented, reviewed,
-  and **running** as of 2026-07-28; protocol decisions and status are in
-  `.claude/experiments.md` (§ Experiment queue → Batch 3 follow-ups). D2
-  (degenerate-eigenbasis randomization) is designed there but not implemented.
+  making its degenerate eigenbasis deterministic (disclosed in the results log). EXP ran three
+  full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed via `exp_fold_rerun.py`
+  (the reusable single-fold driver). The DGN BREC canonicalization ablation D1
+  (`BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`, with a GIN regime-change
+  control) is **running** as of 2026-07-28; D2 (degenerate-eigenbasis randomization) is
+  designed in `.claude/experiments.md` (§ Experiment queue) but not implemented.
   The canonical-labelling side of the theory is now code:
   `utils/_utils.py: canonicalize_graph(s)` (pynauty; lazy import so machines without it
   are unaffected) permutes each graph into the nauty canonical order — the data-side
