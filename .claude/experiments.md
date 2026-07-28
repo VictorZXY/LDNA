@@ -533,13 +533,30 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
-**Batch 3 — follow-ups (proposed, NOT yet run).** Two optional refinements were discussed after
-the batch-3 results above landed. Both were **only scaffolded and then reverted** — there are **no
-results for either**; the committed state (HEAD at "Docs: record the BREC results; batch 3
-complete") is clean and does not contain their code. A future session picking these up starts from
-scratch. They do not change any committed number.
+**Batch 3 — follow-ups (in flight 2026-07-28).** Two refinements to the batch-3 results above.
+Code is committed (`exp_fold_rerun.py`; `BRECDataset(canonical=False)` +
+`dgn/gin_brec_noncanon.yaml`) and both runs are launched on cuda:1; results pending. Protocol
+decisions fixed at launch, after an independent code review:
 
-- [ ] **#1 — EXP best-of-5 to push LDNA fold 10 to ~1.00.** The committed EXP result is
+- **#1 selection is pure val** (first maximum on ties) — the convention that produced the
+  committed best-of-3 (verified: it reproduces fold 10's 0.5167 from seed 43 with no test
+  tie-break). A seed reaching val 1.0 ends the sweep early, which is provably equivalent under
+  val-selection. The driver's candidates are a **new self-contained family** (fresh RNG per seed;
+  the committed run-10 draws continued a stream advanced by runs 1–9 and are not reproducible in
+  isolation), so fold 10's number is the best-of-5 within this family — it **replaces** the
+  committed fold-10 number rather than extending its candidate set (best-of-8 on one fold would
+  be asymmetric vs. every other fold and baseline).
+- **D1 gains a GIN control** on the same non-canonical build (`gin_brec_noncanon.yaml`): dropping
+  canonicalization changes the RPC statistical regime for *every* model (within-class copies stay
+  genuinely permuted → the near-zero within-class covariance behind the S+εI guard becomes a real
+  covariance), not just DGN's field. GIN is exactly permutation-invariant, so it isolates the
+  regime change from the field effect. Expected signature of a real invariance effect: DGN's drop
+  concentrated in the degenerate families (Regular/CFI/DR) — both directional aggregators are
+  sign-invariant (`dir1-av` weights by `|field|`; `dir1-dx` takes `.abs()` of its output), so
+  simple-λ₁ graphs should not move; a uniform drop across all categories would indicate the
+  regime confound instead.
+
+- [ ] **#1 (running) — EXP best-of-5 to push LDNA fold 10 to ~1.00.** The committed EXP result is
       **best-of-3** (seeds 42/43/44, per-fold val-selection, applied symmetrically to all models).
       Folds 1–9 each already reached val=1.0 under some seed; only **fold 10** is stuck (0/3 seeds
       broke it). Diagnosis (real, from the three seeds): the breakout is an init lottery — stuck
@@ -554,7 +571,7 @@ scratch. They do not change any committed number.
       by theorem (no need to rerun for the number, only for symmetry bookkeeping); DGN is already
       1.0000 and best-of-N is monotone, so it needs no reruns. **Run on an idle GPU or on CPU** —
       the fold is tiny, and cuda:1 contention previously stalled it.
-- [ ] **#2 — DGN BREC ablation: how much of 271.4 is the shared canonicalization?** DGN's Laplacian
+- [ ] **#2 (D1 running + GIN control; D2 designed, not implemented) — DGN BREC ablation: how much of 271.4 is the shared canonicalization?** DGN's Laplacian
       directional field is computed from `edge_index` by `torch.linalg.eigh`. On the regular BREC
       families the low-frequency eigenvalues are **degenerate** (repeated), so within the degenerate
       eigenspace "which vector is the eigenvector" is mathematically arbitrary — this is exactly the

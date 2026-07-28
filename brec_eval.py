@@ -110,9 +110,12 @@ def main(args):
         if args.model == 'DGN':
             # Mirror the resolver ordering: the Laplacian eigenvector field is attached AFTER the
             # canonical order (BRECDataset canonicalizes in process()), and the in-degree histogram
-            # the directional scalers need is built over the whole dataset.
+            # the directional scalers need is built over the whole dataset. The sidecar cache name
+            # carries the `canonical` flag like the processed filename does, so alternating the
+            # flag under one root can never thrash (or overwrite) the other build's cache.
             num_eig_vec = model_args.get('num_eig_vec', 1)
-            dataset = add_eig_vecs(dataset, k=num_eig_vec, cache_name='all')
+            cache_name = 'all' if dataset.canonical else 'all_noncanon'
+            dataset = add_eig_vecs(dataset, k=num_eig_vec, cache_name=cache_name)
             deg = degree_histogram(dataset)
 
         model = build_model(args.model, model_args, deg=deg)

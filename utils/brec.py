@@ -50,9 +50,18 @@ class BRECDataset(InMemoryDataset):
     ``nn.Linear(1, emb)`` node encoder maps to the model width, and every graph is put into a nauty
     canonical node order via ``canonicalize_graph`` — the repo's permutation-invariance device,
     applied identically for every model (LDNA reads the order via ``rank_mode='position'``).
+
+    ``canonical=False`` skips the canonicalization and keeps the raw graph6 node order — the
+    reference benchmark's own construction, in which the 32 copies of a graph stay genuinely
+    permuted. It exists for the DGN attribution ablation (how much of DGN's score rides on the
+    canonical order making its degenerate Laplacian eigenbasis consistent across copies) and is
+    given its own processed filename; point it at a separate ``root`` so the sidecar eigenvector
+    cache also stays apart from the main one.
     """
 
-    def __init__(self, root='data/brec', transform=None, pre_transform=None, pre_filter=None):
+    def __init__(self, root='data/brec', canonical=True, transform=None, pre_transform=None,
+                 pre_filter=None):
+        self.canonical = canonical
         super().__init__(root, transform, pre_transform, pre_filter)
         self.load(self.processed_paths[0])
 
@@ -62,7 +71,7 @@ class BRECDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['brec_v3.pt']
+        return ['brec_v3.pt' if self.canonical else 'brec_v3_noncanon.pt']
 
     def process(self):
         data_list = np.load(self.raw_paths[0], allow_pickle=True)
@@ -71,9 +80,10 @@ class BRECDataset(InMemoryDataset):
         for graph6 in data_list:
             graph = from_networkx(nx.from_graph6_bytes(graph6))
             # Featureless graphs: a constant column matches the MNIST-style `nn.Linear(1, emb)`
-            # encoder path. canonicalize_graph then imposes the individualizing canonical order.
+            # encoder path. canonicalize_graph then imposes the individualizing canonical order
+            # (unless the ablation asks for the raw graph6 order).
             graph.x = torch.ones([graph.num_nodes, 1], dtype=torch.float)
-            graphs.append(canonicalize_graph(graph))
+            graphs.append(canonicalize_graph(graph) if self.canonical else graph)
 
         if self.pre_filter is not None:
             graphs = [g for g in graphs if self.pre_filter(g)]
