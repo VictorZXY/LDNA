@@ -85,11 +85,13 @@
     is exactly 1-WL — the sort is then purely the invariance device.
 - Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete** (results in
   `.claude/experiments.md` § Results log). Headline: LDNA decisively breaks the 1-WL ceiling
-  (EXP 1.00 / CEXP 1.00 / BREC 122.8 pairs zero-init, 312.0 with the gate-init variant
-  `gate_init_std: 0.1` — all with clean reliability controls) while GIN
+  (EXP 1.00 / CEXP 1.00 / BREC **312.0** official — the gate-init variant `gate_init_std: 0.1`,
+  promoted from the zero-init 122.8, which is kept alongside; all with clean reliability
+  controls) while GIN
   sits on it exactly (0.50 / 0.75 / 0); DGN — the one baseline claiming >1-WL — saturates
-  EXP/CEXP too and leads BREC (271.4, ≈3-WL level), helped by the shared canonicalization
-  making its degenerate eigenbasis deterministic (disclosed in the results log). EXP ran three
+  EXP/CEXP too and scores BREC **144.4** official (its own construction, established by the
+  canonicalization ablation; the shared-canonicalization 271.4 — ≈3-WL level, boosted by the
+  deterministic degenerate eigenbasis — is kept alongside, disclosed in the results log). EXP ran three
   full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed via `exp_fold_rerun.py`
   (the reusable single-fold driver). The DGN BREC canonicalization ablation is **done**
   (2026-07-28): under the benchmark's own raw-graph6 construction (`BRECDataset(canonical=False)`)
