@@ -1,0 +1,26 @@
+experiment_name: gin_brec
+
+# Model specific arguments/hyperparameters
+model: GIN
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_trans_layers: 1
+  eps: 0.0
+  train_eps: true
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 0
+seed: 42
+s_epsilon: true
+log_dir: out/logs/

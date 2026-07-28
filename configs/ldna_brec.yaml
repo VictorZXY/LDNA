@@ -1,0 +1,26 @@
+experiment_name: ldna_brec
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+  rank_mode: position
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 0
+seed: 42
+s_epsilon: true
+log_dir: out/logs/
