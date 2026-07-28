@@ -550,8 +550,6 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
       not by the original runs: LDNA's was promoted by the gate-init experiment, DGN's by the
       canonicalization ablation. Kept alongside as companions: LDNA 122.8±9.2 (zero-init) and
       DGN 271.4±1.0 (shared-canonicalization pipeline).
-- [x] BREC canonicalization ablation: DGN 144.4±0.7 on the non-canonical build (vs 271.4±1.0
-      canonical); GIN control exactly 0 on both builds
 
 **Batch 3 — follow-up: DGN BREC canonicalization ablation** (done 2026-07-28; results in
 § Results log). Code committed: `BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`.
