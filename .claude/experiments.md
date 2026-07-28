@@ -533,6 +533,56 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
+**Batch 3 — follow-ups (proposed, NOT yet run).** Two optional refinements were discussed after
+the batch-3 results above landed. Both were **only scaffolded and then reverted** — there are **no
+results for either**; the committed state (HEAD at "Docs: record the BREC results; batch 3
+complete") is clean and does not contain their code. A future session picking these up starts from
+scratch. They do not change any committed number.
+
+- [ ] **#1 — EXP best-of-5 to push LDNA fold 10 to ~1.00.** The committed EXP result is
+      **best-of-3** (seeds 42/43/44, per-fold val-selection, applied symmetrically to all models).
+      Folds 1–9 each already reached val=1.0 under some seed; only **fold 10** is stuck (0/3 seeds
+      broke it). Diagnosis (real, from the three seeds): the breakout is an init lottery — stuck
+      folds move with the seed ({3,7,8,10}/{2,6,10}/{5,10}) — and fold 10 is the hardest because
+      the contiguous-fold protocol leaves its training pool without the large-graph tail (graphs
+      972–1199 avg ~50 nodes vs ~43.6 elsewhere). Plan: extend to **best-of-5** (add seeds 45/46),
+      val-selected, symmetric. Efficiency note: the 10-fold CV split is deterministic in fold index
+      (`utils/resolver._planar_cv_folds`), so **only fold 10 need be rerun** — folds 1–9 are already
+      1.0 and best-of-N is monotone. Keep the 5 fold-10 inits on one self-consistent construction
+      (e.g. a scratch driver that trains only `cv_folds[9]` as a single run per seed 42–46) so the
+      best-of-5 is internally consistent; folds 1–9 stay at their committed 1.0. GIN stays 0.5000
+      by theorem (no need to rerun for the number, only for symmetry bookkeeping); DGN is already
+      1.0000 and best-of-N is monotone, so it needs no reruns. **Run on an idle GPU or on CPU** —
+      the fold is tiny, and cuda:1 contention previously stalled it.
+- [ ] **#2 — DGN BREC ablation: how much of 271.4 is the shared canonicalization?** DGN's Laplacian
+      directional field is computed from `edge_index` by `torch.linalg.eigh`. On the regular BREC
+      families the low-frequency eigenvalues are **degenerate** (repeated), so within the degenerate
+      eigenspace "which vector is the eigenvector" is mathematically arbitrary — this is exactly the
+      pathology the DGN paper flags when it calls the spectral field "unusable" on symmetric graphs
+      (it substitutes image coordinates on CIFAR10 for this reason: grid symmetry makes λ₁
+      degenerate). Two effects can rescue it in our pipeline: **(A)** `eigh` is deterministic, so the
+      same matrix always yields the same basis; **(B)** the shared canonicalization gives isomorphic
+      copies the *same* labelled matrix, so the field becomes isomorphism-invariant (which the RPC
+      reliability control rewards). The committed DGN 271.4 (≈ published 3-WL/PPGN level) benefits
+      from both — i.e. our shared preprocessing turns the paper's "unusable" field into a legitimate
+      invariant feature, which must be disclosed (it already is, in the BREC results-log row). Two
+      ablations to quantify the split, DGN-only, BREC-only, everything else at the committed
+      64×8/BN-on/S+εI/10-seed setting:
+      - **D1 (remove B, keep A):** build BREC **without** canonicalization (raw graph6 order), keep
+        deterministic `eigh`. The field stays learnable per graph but is no longer consistent across
+        the 32 permuted copies → expect reliability to start failing and the score to drop. Isolates
+        how much came from the invariance (B).
+      - **D2 (remove A, approach the paper's pathology):** keep canonicalization but **randomize
+        inside the degenerate eigenspace** (random orthogonal rotation + sign flip on the near-equal
+        eigenvalue groups), restoring the arbitrariness the paper assumes → expect the regular
+        families to collapse toward DGN's true unaided level. Isolates the deterministic solver (A).
+      Implementation sketch (reverted last time): a `canonical` flag on `BRECDataset` (distinct
+      processed-cache filename + a separate `data/brec_noncanon` root so the main cache is untouched)
+      for D1; a degenerate-subspace randomizer in `add_eig_vec` gated behind a flag for D2. Intent is
+      **honest attribution, not to depress DGN** — if DGN stays strong, report that. It also
+      strengthens the LDNA story: LDNA's 122.8 comes purely from its own rank-gate, not from this
+      incidental spectral boost.
+
 ---
 
 ## Results log
