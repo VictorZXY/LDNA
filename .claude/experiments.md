@@ -76,8 +76,51 @@ queue, node-level infrastructure). Loaders are from `torch_geometric.datasets` /
 
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
-| `EXP` / `CEXP` | distinguish 1-WL-equivalent pairs | accuracy | max | custom (acc) | todo | from GNN-RNI; port dataset + splits from source repo |
-| `BREC` | pairwise graph distinguishing | # pairs distinguished (RPC protocol) | max | custom (BREC protocol) | todo | non-standard eval — reuse BREC's own comparison procedure, not a plain train/val/test loop |
+| `EXP` / `CEXP` | distinguish 1-WL-equivalent pairs | accuracy | max | `AccuracyEvaluator` | done | ported from GNN-RNI (GPL v3 — note on redistribution); 600 pairs each, binary node-type feature, **edge-less** (GIN family); paper's contiguous 10-fold CV, folds map to `runs`; raw pickles under `data/EXP|CEXP/raw/` (gitignored, fetch from the GNN-RNI repo) |
+| `BREC` | pairwise graph distinguishing | # pairs distinguished (RPC protocol) | max | RPC core in `utils/brec.py` | done | dedicated entry point `brec_eval.py` (the train/val/test loop does not fit the pairwise protocol); 400 pairs × 10 seeds; featureless (`x = ones`); `data/brec/raw/brec_v3.npy` from the BREC repo |
+
+> **Batch-3 protocol decisions (2026-07-27).**
+> - **Canonical order**: these graphs are featureless/uniform, so the feature lexsort cannot impose
+>   an order. The permutation-invariance device is a **nauty canonical labelling**
+>   (`utils/_utils.py: canonicalize_graph(s)`, pynauty, data-side, replaces `sort_graphs` on these
+>   datasets); LDNA reads it via `rank_mode: position`. Isomorphic graphs get the identical
+>   labelled form, so invariance is exact. Write-up caveat: nauty canonization is
+>   isomorphism-complete — LDNA's beyond-1-WL signal on these benchmarks is the **combination** of
+>   canonical individualization (the source) and the learned rank-gate aggregation (the mechanism).
+>   Feature-mode LDNA is provably exactly 1-WL here and is not run.
+> - **Model set: LDNA + GIN + DGN only.** Every other baseline is provably ≤ 1-WL (none claims
+>   otherwise) and is recorded at the theoretical ceiling (EXP 50%, BREC 0/400) without burning
+>   compute; GIN is the empirical 1-WL control; DGN is the one baseline whose paper claims beyond-
+>   1-WL structure (spectral directional field). DGN keeps its default **Laplacian field** — the
+>   synthetic graphs provide no domain field to substitute, and inventing one would inflate the
+>   baseline. Its spectrum is degenerate on the regular BREC families (recorded as DGN's own
+>   limitation); the canonical order incidentally makes the arbitrary eigenbasis deterministic.
+> - **No hyperparameter search.** Hyperparameters are protocol constants — EXP: the GNN-RNI
+>   protocol (Adam, constant lr 1e-3 via `min_lr == lr`, 500 epochs, batch 20, 8×64); BREC: the
+>   benchmark's fixed constants (20 epochs/pair, lr 1e-4, batch 16, 16-dim embedding — the T²
+>   threshold 72.34 is calibrated for them; backbone 4×64 per the reference). Tuning could not
+>   change the structural result (1-WL models sit at the ceiling regardless) and would invite a
+>   fairness objection. `hyperparam_search.py` is deliberately **not** extended to these datasets.
+> - **BREC specifics**: canonicalization collapses each block's 32 permuted copies onto one
+>   labelled graph, so every deterministic model has within-class covariance ≈ 0 and the vanilla
+>   Hotelling T² is numerically meaningless — the **S + εI variant** (the BREC authors' own
+>   commented-out alternative) is the default (`s_epsilon`). `batch_norm: true` (explicit in the
+>   three `*_brec.yaml`, shared): adjudicated empirically after conflicting evidence. BN's
+>   batch-mean subtraction does erase the between-graph mean signal on regular constant-feature
+>   families (measured: BN-off distinguishes 1/4 SimpleReg pairs from untrained embeddings
+>   alone), but with BN off LDNA's contrastive loss stays pinned at 1.0 in **every** family — it
+>   never trains inside the protocol's 80-step budget. Category-weighted totals ≈124 (on) vs
+>   ≈12 (off) / 400 → BN on by ~10×. GIN is 0 both ways; the reliability negative control is ≈0
+>   throughout, so BN-on distinctions are not artifacts. Backbone is **64 hidden × 8 layers**
+>   (shared), chosen by a pre-committed probe sweep over {64×4, 128×4, 64×8, 128×8} on 20 pairs
+>   × 3 seeds (per-seed totals [3,3,4] / [3,2,2] / [5,5,5] / [3,4,3]; depth helps, extra width
+>   hurts inside the step budget); DGN runs and GIN stays 0 at that size. Results go to
+>   `out/logs/<name>_results.json` (the Logger's train/val/test shape does not fit).
+> - **EXP deviations from the source protocol** (recorded, all shared across models): `attention`
+>   readout per the repo-wide shared protocol (paper: max-pool); scheduler steps on val accuracy
+>   with `mode: max` (paper: val loss / min — numerically inert since the LR is constant);
+>   learnable `Encoder` embedding instead of one-hot; CrossEntropy ≡ NLL+log_softmax; the repo's
+>   best-epoch reporting vs the paper's final-epoch (negligible on a task that saturates).
 
 ---
 
@@ -446,10 +489,11 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 **Expressiveness (custom evaluation):**
 
-- [ ] Add `EXP` / `CEXP` (port dataset + splits; accuracy).
-- [ ] Add `BREC` (dataset + BREC pairwise-distinguishing evaluation).
-- [ ] Extend `hyperparam_search.py` and the experiment protocol to node-level and
-      expressiveness datasets as their pipelines land.
+- [x] Add `EXP` / `CEXP` (ported dataset + the paper's 10-fold CV; `AccuracyEvaluator`).
+- [x] Add `BREC` (dataset + ported RPC pairwise evaluation; `utils/brec.py`, `brec_eval.py`).
+- [x] ~~Extend `hyperparam_search.py` to expressiveness datasets~~ — resolved as **not needed**:
+      batch-3 hyperparameters are protocol constants (see § Datasets → batch-3 notes). Node-level
+      search support still lands with the node-level pipeline.
 
 ---
 
@@ -481,6 +525,14 @@ invalid after the architecture change):
 - [ ] `MNISTSuperpixels`
 - [ ] `ogbg-code2` (edge-less pipeline landed; run after a GPU frees)
 
+**Batch 3 — synthetic expressiveness** (protocol in § Datasets → batch-3 notes; no search,
+no broadcast — the three configs per dataset are the protocol):
+
+- [ ] `EXP`: `{ldna,gin,dgn}_exp.yaml` (10-fold CV × 500 epochs; ~0.5–1 GPU·h per model)
+- [ ] `CEXP`: `{ldna,gin,dgn}_cexp.yaml`
+- [ ] `BREC`: `{ldna,gin,dgn}_brec.yaml` via `brec_eval.py` (400 pairs × 10 seeds;
+      ~1.5 h GIN-class, 2–4× for LDNA/DGN)
+
 ---
 
 ## Results log
@@ -497,6 +549,8 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-08 | ZINC (full) | LDNA (rank-gated) rerun | same tuned shared config as 07-10 ZINC row, runs=3, 150ep; baselines frozen (LDNA-internal change only) | test MAE: LDNA 0.0856±0.0021 (SEM 0.0012) | **#2** | Rank-gated aggregation vs old LDNA 0.0903±0.0037: −0.0047 (clear improvement). Still behind #1 PNA 0.0807±0.0119 (SEM 0.0069): gap 0.0049 < combined SEM 0.0070 → now within noise of PNA (was marginally significant). Per user: keep tuned params, rerun rank-gated LDNA on all datasets. |
 | 2026-07-22 | ogbg-molhiv | LDNA (rank-gated) rerun | same tuned shared config as 07-10 molhiv row, runs=10, 150ep; baselines frozen | test ROC-AUC: LDNA 0.7923±0.0089 (SEM 0.0028) | **#1 (nominal) / tie** | vs old LDNA 0.7867±0.0118: +0.0056 (> combined SEM 0.0047, modest real gain). vs old #1 GAT 0.7875±0.0175 (SEM 0.0055): LDNA leads by 0.0048 < combined SEM 0.0062 → statistical tie, but LDNA takes the nominal top spot (was #2). |
 | 2026-07-23 | MNISTSuperpixels | LDNA (rank-gated) rerun | same tuned shared config as 07-13 MNIST row, runs=3, 150ep; baselines frozen | test acc: LDNA 0.9410±0.0023 (SEM 0.0013) | **#2** | vs old LDNA 0.9357±0.0019: +0.0053 (> combined SEM 0.0017, real gain). Still behind #1 PNA 0.9532±0.0004 (SEM 0.0002): gap 0.0122 ≫ combined SEM 0.0013 → still highly significant. Closes ~30% of the old LDNA→PNA gap but PNA's per-node degree-scaler statistics remain out of reach on this dataset. |
+| 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-3 seeds (42/43/44) selected on **val**, applied symmetrically | test acc: LDNA **0.9517** (9 folds 1.0000, fold 10 0.5167) | **#2**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. LDNA breakout is a per-(fold,seed) lottery: stuck folds {3,7,8,10}/{2,6,10}/{5,10}; fold 10 broke under 0/3 seeds — it is the only fold whose training pool excludes the large-graph tail (graphs 972–1199 avg ~50 nodes vs ~43.6 elsewhere; contiguous-fold protocol artifact, disclosed). |
+| 2026-07-28 | CEXP | LDNA + GIN + DGN (batch 3) | same shared config, seed 42, 10-fold CV | test acc: LDNA **1.0000±0.0000** | **#1 (tie with DGN)** | DGN 1.0000±0.0000; GIN 0.7492±0.0026 ≈ the theoretical 75% (corrupt half 1-WL-learnable, EXP-hard half pinned at 50%). No stuck folds for LDNA on CEXP — the corrupt half's easy gradient reliably bootstraps the rank gate. |
 
 ### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
 

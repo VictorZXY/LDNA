@@ -82,6 +82,21 @@
   - Extras: random continuous init attains ≥ 1-WL a.s. (embeddings refine colours);
     strictness needs no randomness. Feature-tie sorting alone (no individualization)
     is exactly 1-WL — the sort is then purely the invariance device.
+- Synthetic-expressiveness batch (EXP/CEXP + BREC) is implemented; EXP/CEXP results are in
+  (`.claude/experiments.md` § Results log: LDNA breaks the 1-WL ceiling GIN sits on exactly;
+  DGN's spectral field also saturates this family), BREC headline runs are the remaining step.
+  The canonical-labelling side of the theory is now code:
+  `utils/_utils.py: canonicalize_graph(s)` (pynauty; lazy import so machines without it
+  are unaffected) permutes each graph into the nauty canonical order — the data-side
+  replacement for the feature lexsort on datasets whose features cannot impose an order —
+  and LDNA reads it via the existing `rank_mode: position`. EXP/CEXP (GNN-RNI SAT pairs)
+  run through the standard loop with the paper's contiguous 10-fold CV (folds map onto
+  `runs` via a small hook in `train.py`; `utils/exp.py`, `AccuracyEvaluator`). BREC runs
+  through a dedicated entry point (`brec_eval.py` + the ported RPC core in `utils/brec.py`)
+  since its pairwise protocol fits neither the epoch loop nor the Logger. Model set is
+  LDNA + GIN + DGN only (the other baselines are provably ≤ 1-WL and recorded at the
+  ceiling); no hyperparameter search (protocol constants). Decisions and deviations are in
+  `.claude/experiments.md` (§ Datasets → batch-3 notes, § Experiment queue).
 
 ---
 
