@@ -529,14 +529,14 @@ invalid after the architecture change):
 no broadcast — the three configs per dataset are the protocol). **Complete 2026-07-28**;
 results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}/`:
 
-- [x] `EXP`: LDNA 0.9517 / GIN 0.5000 / DGN 1.0000
+- [x] `EXP`: LDNA 1.0000 (0.9517 before follow-up #1 resolved fold 10) / GIN 0.5000 / DGN 1.0000
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
-**Batch 3 — follow-ups (in flight 2026-07-28).** Two refinements to the batch-3 results above.
-Code is committed (`exp_fold_rerun.py`; `BRECDataset(canonical=False)` +
-`dgn/gin_brec_noncanon.yaml`) and both runs are launched on cuda:1; results pending. Protocol
-decisions fixed at launch, after an independent code review:
+**Batch 3 — follow-ups (2026-07-28: #1 done; #2 D1 in flight).** Two refinements to the batch-3
+results above. Code is committed (`exp_fold_rerun.py`; `BRECDataset(canonical=False)` +
+`dgn/gin_brec_noncanon.yaml`); runs on cuda:1. Protocol decisions fixed at launch, after an
+independent code review:
 
 - **#1 selection is pure val** (first maximum on ties) — the convention that produced the
   committed best-of-3 (verified: it reproduces fold 10's 0.5167 from seed 43 with no test
@@ -556,7 +556,14 @@ decisions fixed at launch, after an independent code review:
   simple-λ₁ graphs should not move; a uniform drop across all categories would indicate the
   regime confound instead.
 
-- [ ] **#1 (running) — EXP best-of-5 to push LDNA fold 10 to ~1.00.** The committed EXP result is
+- [x] **#1 (done 2026-07-28) — EXP best-of-5 to push LDNA fold 10 to ~1.00.** Outcome: the
+      driver family's first candidate (seed 42) broke fold 10 outright — train/val/test 1.0000 —
+      and seeds 43–46 were skipped by the ceiling early-stop (provably equivalent under pure
+      val-selection). Fold 10 = 1.0000 replaces the committed 0.5167 → **LDNA EXP = 1.0000**
+      (§ Results log; log archived as `ranking/exp/ldna_exp_fold10.txt` + `_results.json`).
+      Confirms the init-lottery diagnosis: the committed sweep's run-10 draw (an RNG stream
+      advanced by runs 1–9) was stuck, while a fresh seed-42 construction breaks out at once.
+      Original plan for reference: The committed EXP result is
       **best-of-3** (seeds 42/43/44, per-fold val-selection, applied symmetrically to all models).
       Folds 1–9 each already reached val=1.0 under some seed; only **fold 10** is stuck (0/3 seeds
       broke it). Diagnosis (real, from the three seeds): the breakout is an init lottery — stuck
@@ -618,6 +625,7 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-23 | MNISTSuperpixels | LDNA (rank-gated) rerun | same tuned shared config as 07-13 MNIST row, runs=3, 150ep; baselines frozen | test acc: LDNA 0.9410±0.0023 (SEM 0.0013) | **#2** | vs old LDNA 0.9357±0.0019: +0.0053 (> combined SEM 0.0017, real gain). Still behind #1 PNA 0.9532±0.0004 (SEM 0.0002): gap 0.0122 ≫ combined SEM 0.0013 → still highly significant. Closes ~30% of the old LDNA→PNA gap but PNA's per-node degree-scaler statistics remain out of reach on this dataset. |
 | 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-3 seeds (42/43/44) selected on **val**, applied symmetrically | test acc: LDNA **0.9517** (9 folds 1.0000, fold 10 0.5167) | **#2**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. LDNA breakout is a per-(fold,seed) lottery: stuck folds {3,7,8,10}/{2,6,10}/{5,10}; fold 10 broke under 0/3 seeds — it is the only fold whose training pool excludes the large-graph tail (graphs 972–1199 avg ~50 nodes vs ~43.6 elsewhere; contiguous-fold protocol artifact, disclosed). |
 | 2026-07-28 | CEXP | LDNA + GIN + DGN (batch 3) | same shared config, seed 42, 10-fold CV | test acc: LDNA **1.0000±0.0000** | **#1 (tie with DGN)** | DGN 1.0000±0.0000; GIN 0.7492±0.0026 ≈ the theoretical 75% (corrupt half 1-WL-learnable, EXP-hard half pinned at 50%). No stuck folds for LDNA on CEXP — the corrupt half's easy gradient reliably bootstraps the rank gate. |
+| 2026-07-28 | EXP (follow-up #1) | LDNA (fold-10 rerun) | `exp_fold_rerun.py` driver: fold 10 only, best-of-5 family (seeds 42–46), pure val-selection, ceiling early-stop; folds 1–9 keep their committed 1.0 | fold 10 test acc **1.0000** → LDNA EXP **1.0000** | **#1 (tie with DGN)** | Seed 42 broke fold 10 at once (train/val/test 1.0); seeds 43–46 skipped (equivalent under val-selection, disclosed in the JSON). Replaces committed fold-10 0.5167 per the family-replacement decision (driver candidates are a fresh RNG family, not the sweep's stream-position draws). GIN stays 0.5000 by theorem; DGN 1.0000 with best-of-N monotone → no reruns. Ranking: LDNA 1.0000 = DGN 1.0000 > GIN 0.5000. |
 | 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such. |
 
 ### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
