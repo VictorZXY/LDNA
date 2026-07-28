@@ -56,7 +56,9 @@ class BRECDataset(InMemoryDataset):
     permuted. It exists for the DGN attribution ablation (how much of DGN's score rides on the
     canonical order making its degenerate Laplacian eigenbasis consistent across copies) and is
     given its own processed filename; point it at a separate ``root`` so the sidecar eigenvector
-    cache also stays apart from the main one.
+    cache also stays apart from the main one. When several configs target a freshly-created root,
+    build it once from a single process first — PyG's ``process()`` has no locking, so two cold
+    starts would race on the same multi-hundred-MB ``torch.save``.
     """
 
     def __init__(self, root='data/brec', canonical=True, transform=None, pre_transform=None,
