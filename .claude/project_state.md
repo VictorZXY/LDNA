@@ -85,7 +85,8 @@
     is exactly 1-WL — the sort is then purely the invariance device.
 - Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete** (results in
   `.claude/experiments.md` § Results log). Headline: LDNA decisively breaks the 1-WL ceiling
-  (EXP 1.00 / CEXP 1.00 / BREC 122.8 pairs, all with clean reliability controls) while GIN
+  (EXP 1.00 / CEXP 1.00 / BREC 122.8 pairs zero-init, 312.0 with the gate-init variant
+  `gate_init_std: 0.1` — all with clean reliability controls) while GIN
   sits on it exactly (0.50 / 0.75 / 0); DGN — the one baseline claiming >1-WL — saturates
   EXP/CEXP too and leads BREC (271.4, ≈3-WL level), helped by the shared canonicalization
   making its degenerate eigenbasis deterministic (disclosed in the results log). EXP ran three
