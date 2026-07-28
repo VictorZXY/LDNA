@@ -543,7 +543,9 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
 
 - [x] `EXP`: LDNA 1.0000 / GIN 0.5000 / DGN 1.0000
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
-- [x] `BREC` (official): LDNA **312.0±4.0** (gate-init) / GIN 0.0 / DGN **144.4±0.7** (its own
+- [x] `BREC` (official): LDNA **312.0±4.0** (gate-init; `gate_init_std: 0.1` is a **probe-selected**
+      LDNA-internal knob — pre-committed grid, four arms archived under
+      `ranking/brec/gateinit_probe/`) / GIN 0.0 / DGN **144.4±0.7** (its own
       construction) — of 400. Both official numbers were established by the batch-3 follow-ups,
       not by the original runs: LDNA's was promoted by the gate-init experiment, DGN's by the
       canonicalization ablation. Kept alongside as companions: LDNA 122.8±9.2 (zero-init) and
