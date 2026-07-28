@@ -216,6 +216,15 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > query anyway. If the search is ever parameterized by model, it fails loudly at the first
 > forward (`ValueError: Argument 'eig_vec' must be given ...`), not silently.
 
+> **DGN's advantage is dataset-selective.** DGN places 1st only on ZINC (0.0507 test MAE)
+> and code2 (0.1876 test F1) — the datasets whose dominant structure matches its directional
+> field: the molecular backbone recovered by the low-frequency Laplacian eigenvector, and the
+> AST's exact root-to-leaf depth. Elsewhere the field is fragmented (molhiv, 7.5% disconnected
+> → 4th), collapses a 2-D layout onto one axis (MNIST → 3rd, tied LDNA), or is one axis shared
+> across 128 tasks (molpcba, mid-pack), and DGN reduces to a costlier PNA. The edge is bought
+> with a hand-supplied per-dataset directional prior; LDNA is top-2 on all five without one.
+> Paper-draft phrasing: `docs/dgn_specialization.md`.
+
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
 > `edge_attr`). The rule is realized by the **config inventory**: each dataset ships only
