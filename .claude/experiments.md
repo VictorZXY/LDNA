@@ -532,9 +532,11 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
 - [x] `EXP`: LDNA 1.0000 / GIN 0.5000 / DGN 1.0000
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
+- [x] BREC canonicalization ablation: DGN 144.4±0.7 on the non-canonical build (vs 271.4±1.0
+      canonical); GIN control exactly 0 on both builds
 
-**Batch 3 — follow-up: DGN BREC canonicalization ablation** (running on cuda:1, 2026-07-28).
-Code committed: `BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`.
+**Batch 3 — follow-up: DGN BREC canonicalization ablation** (done 2026-07-28; results in
+§ Results log). Code committed: `BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`.
 (`exp_fold_rerun.py`, added alongside, is the reusable single-fold EXP/CEXP driver behind the
 finished fold-10 rerun — see § Results log.)
 
@@ -548,7 +550,7 @@ finished fold-10 rerun — see § Results log.)
   simple-λ₁ graphs should not move; a uniform drop across all categories would indicate the
   regime confound instead.
 
-- [ ] **DGN BREC canonicalization ablation (running): how much of 271.4 is the shared
+- [x] **DGN BREC canonicalization ablation (done 2026-07-28): how much of 271.4 is the shared
       canonicalization?** DGN's Laplacian directional field is computed from `edge_index` by
       `torch.linalg.eigh`. On the regular BREC families the low-frequency eigenvalues are
       **degenerate**, so within the degenerate eigenspace "which vector is the eigenvector" is
@@ -589,7 +591,8 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-23 | MNISTSuperpixels | LDNA (rank-gated) rerun | same tuned shared config as 07-13 MNIST row, runs=3, 150ep; baselines frozen | test acc: LDNA 0.9410±0.0023 (SEM 0.0013) | **#2** | vs old LDNA 0.9357±0.0019: +0.0053 (> combined SEM 0.0017, real gain). Still behind #1 PNA 0.9532±0.0004 (SEM 0.0002): gap 0.0122 ≫ combined SEM 0.0013 → still highly significant. Closes ~30% of the old LDNA→PNA gap but PNA's per-node degree-scaler statistics remain out of reach on this dataset. |
 | 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-N selected on **val**, applied symmetrically — three full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed (`exp_fold_rerun.py`) | test acc: LDNA **1.0000** (all 10 folds) | **#1 (tie with DGN)**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. Fold 10 was the one fold still short of 1.0 under the three sweep seeds; its extra seed reached train/val/test 1.0 (logs `ranking/exp/ldna_exp_fold10.txt` + `_results.json`). |
 | 2026-07-28 | CEXP | LDNA + GIN + DGN (batch 3) | same shared config, seed 42, 10-fold CV | test acc: LDNA **1.0000±0.0000** | **#1 (tie with DGN)** | DGN 1.0000±0.0000; GIN 0.7492±0.0026 ≈ the theoretical 75% (corrupt half 1-WL-learnable, EXP-hard half pinned at 50%). No stuck folds for LDNA on CEXP — the corrupt half's easy gradient reliably bootstraps the rank gate. |
-| 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such. |
+| 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such (quantified by the canonicalization-ablation row below: unaided DGN 144.4). |
+| 2026-07-28 | BREC (canonicalization ablation) | DGN (+ GIN control) | BREC rebuilt without the shared canonicalization — the benchmark's own raw-graph6 construction (`BRECDataset(canonical=False)`, `data/brec_noncanon`); everything else at the committed 64×8/BN-on/S+εI/10-seed setting | pairs distinguished: DGN **144.4±0.7 / 400** (canonical: 271.4±1.0) | n/a (ablation; LDNA not involved) | The −127 drop is confined to the degenerate families — Regular 99→43, 4-Vertex 20→0, DR 20→0, CFI 29.5→3.0 — while Basic is bit-identical (32.0±0.0) and Extension moves only 70.9→66.4: the signature of the arbitrary degenerate eigenbasis, not of the changed RPC regime. GIN control: exactly 0/400 with 0 reliability failures on all 10 seeds on **both** builds — the regime change alone produces no signal. DGN's reliability failures also 0 throughout (field inconsistency deflates T² rather than inflating it). Reading: DGN's directional aggregation is genuinely >1-WL unaided (144.4, still above LDNA's 122.8); the other ~127 pairs of its committed 271.4 come from the shared canonicalization turning the degenerate eigenbasis into an isomorphism-invariant feature. LDNA's 122.8 involves no spectral pipeline and is untouched by this ablation. |
 
 ### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
 
