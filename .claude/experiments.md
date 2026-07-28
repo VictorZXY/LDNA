@@ -526,12 +526,12 @@ invalid after the architecture change):
 - [ ] `ogbg-code2` (edge-less pipeline landed; run after a GPU frees)
 
 **Batch 3 — synthetic expressiveness** (protocol in § Datasets → batch-3 notes; no search,
-no broadcast — the three configs per dataset are the protocol):
+no broadcast — the three configs per dataset are the protocol). **Complete 2026-07-28**;
+results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}/`:
 
-- [ ] `EXP`: `{ldna,gin,dgn}_exp.yaml` (10-fold CV × 500 epochs; ~0.5–1 GPU·h per model)
-- [ ] `CEXP`: `{ldna,gin,dgn}_cexp.yaml`
-- [ ] `BREC`: `{ldna,gin,dgn}_brec.yaml` via `brec_eval.py` (400 pairs × 10 seeds;
-      ~1.5 h GIN-class, 2–4× for LDNA/DGN)
+- [x] `EXP`: LDNA 0.9517 / GIN 0.5000 / DGN 1.0000
+- [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
+- [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
 ---
 
@@ -551,6 +551,7 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-23 | MNISTSuperpixels | LDNA (rank-gated) rerun | same tuned shared config as 07-13 MNIST row, runs=3, 150ep; baselines frozen | test acc: LDNA 0.9410±0.0023 (SEM 0.0013) | **#2** | vs old LDNA 0.9357±0.0019: +0.0053 (> combined SEM 0.0017, real gain). Still behind #1 PNA 0.9532±0.0004 (SEM 0.0002): gap 0.0122 ≫ combined SEM 0.0013 → still highly significant. Closes ~30% of the old LDNA→PNA gap but PNA's per-node degree-scaler statistics remain out of reach on this dataset. |
 | 2026-07-28 | EXP | LDNA + GIN + DGN (batch 3) | canonical order (nauty) + rank_mode position; shared h64/l8, attention, residual, 10-fold CV, 500ep, constant lr 1e-3; per-fold best-of-3 seeds (42/43/44) selected on **val**, applied symmetrically | test acc: LDNA **0.9517** (9 folds 1.0000, fold 10 0.5167) | **#2**; 1-WL ceiling broken | DGN 1.0000±0.0000 (seed 42; best-of-N monotone → no extra seeds needed); GIN 0.5000±0.0000 at **all three seeds** — the exact 1-WL ceiling. LDNA breakout is a per-(fold,seed) lottery: stuck folds {3,7,8,10}/{2,6,10}/{5,10}; fold 10 broke under 0/3 seeds — it is the only fold whose training pool excludes the large-graph tail (graphs 972–1199 avg ~50 nodes vs ~43.6 elsewhere; contiguous-fold protocol artifact, disclosed). |
 | 2026-07-28 | CEXP | LDNA + GIN + DGN (batch 3) | same shared config, seed 42, 10-fold CV | test acc: LDNA **1.0000±0.0000** | **#1 (tie with DGN)** | DGN 1.0000±0.0000; GIN 0.7492±0.0026 ≈ the theoretical 75% (corrupt half 1-WL-learnable, EXP-hard half pinned at 50%). No stuck folds for LDNA on CEXP — the corrupt half's easy gradient reliably bootstraps the rank gate. |
+| 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such. |
 
 ### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
 

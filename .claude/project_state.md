@@ -82,9 +82,12 @@
   - Extras: random continuous init attains ≥ 1-WL a.s. (embeddings refine colours);
     strictness needs no randomness. Feature-tie sorting alone (no individualization)
     is exactly 1-WL — the sort is then purely the invariance device.
-- Synthetic-expressiveness batch (EXP/CEXP + BREC) is implemented; EXP/CEXP results are in
-  (`.claude/experiments.md` § Results log: LDNA breaks the 1-WL ceiling GIN sits on exactly;
-  DGN's spectral field also saturates this family), BREC headline runs are the remaining step.
+- Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete** (results in
+  `.claude/experiments.md` § Results log). Headline: LDNA decisively breaks the 1-WL ceiling
+  (EXP 0.95 / CEXP 1.00 / BREC 122.8 pairs, all with clean reliability controls) while GIN
+  sits on it exactly (0.50 / 0.75 / 0); DGN — the one baseline claiming >1-WL — saturates
+  EXP/CEXP too and leads BREC (271.4, ≈3-WL level), helped by the shared canonicalization
+  making its degenerate eigenbasis deterministic (disclosed in the results log).
   The canonical-labelling side of the theory is now code:
   `utils/_utils.py: canonicalize_graph(s)` (pynauty; lazy import so machines without it
   are unaffected) permutes each graph into the nauty canonical order — the data-side
