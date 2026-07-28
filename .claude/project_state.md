@@ -89,10 +89,10 @@
   EXP/CEXP too and leads BREC (271.4, ≈3-WL level), helped by the shared canonicalization
   making its degenerate eigenbasis deterministic (disclosed in the results log). EXP ran three
   full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed via `exp_fold_rerun.py`
-  (the reusable single-fold driver). The DGN BREC canonicalization ablation D1
+  (the reusable single-fold driver). The DGN BREC canonicalization ablation
   (`BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`, with a GIN regime-change
-  control) is **running** as of 2026-07-28; D2 (degenerate-eigenbasis randomization) is
-  designed in `.claude/experiments.md` (§ Experiment queue) but not implemented.
+  control) is **running** as of 2026-07-28 — it evaluates DGN under the benchmark's own
+  raw-graph6 construction; details in `.claude/experiments.md` (§ Experiment queue).
   The canonical-labelling side of the theory is now code:
   `utils/_utils.py: canonicalize_graph(s)` (pynauty; lazy import so machines without it
   are unaffected) permutes each graph into the nauty canonical order — the data-side

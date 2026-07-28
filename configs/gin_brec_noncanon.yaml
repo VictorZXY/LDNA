@@ -1,9 +1,10 @@
 experiment_name: gin_brec_noncanon
 
-# Non-spectral control for the D1 ablation (see dgn_brec_noncanon.yaml): GIN's aggregation is
-# exactly permutation-invariant, so its embeddings cannot depend on the node order the ablation
+# Non-spectral control for the canonicalization ablation (see dgn_brec_noncanon.yaml): GIN's
+# aggregation is exactly permutation-invariant, so its embeddings cannot depend on the node
+# order the ablation
 # removes — if GIN stays at its committed 0/400 with clean reliability on the non-canonical build,
-# the RPC regime change D1 induces (within-class copies genuinely permuted, so the near-zero
+# the RPC regime change the ablation induces (within-class copies genuinely permuted, so the near-zero
 # within-class covariance behind the S+εI guard becomes a real covariance) produces no signal by
 # itself, and any DGN delta can be attributed to its order-dependent eigenvector field.
 # Everything else matches gin_brec.yaml.

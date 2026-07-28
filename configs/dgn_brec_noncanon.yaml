@@ -1,6 +1,6 @@
 experiment_name: dgn_brec_noncanon
 
-# DGN BREC attribution ablation (D1): the dataset is built WITHOUT the shared nauty
+# DGN BREC canonicalization ablation: the dataset is built WITHOUT the shared nauty
 # canonicalization (raw graph6 node order — the reference benchmark's own construction), isolating
 # how much of DGN's committed 271.4/400 rides on the canonical order making its degenerate
 # Laplacian eigenbasis consistent across the 32 permuted copies of each graph. Everything else

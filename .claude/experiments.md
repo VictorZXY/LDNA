@@ -533,12 +533,12 @@ results in § Results log, logs archived under `out/logs/ranking/{exp,cexp,brec}
 - [x] `CEXP`: LDNA 1.0000 / GIN 0.7492 / DGN 1.0000
 - [x] `BREC`: LDNA 122.8±9.2 / GIN 0.0 / DGN 271.4±1.0 (of 400)
 
-**Batch 3 — follow-up: DGN BREC canonicalization ablation** (D1 running on cuda:1, 2026-07-28;
-D2 designed, not implemented). Code committed: `BRECDataset(canonical=False)` +
-`dgn/gin_brec_noncanon.yaml`. (`exp_fold_rerun.py`, added alongside, is the reusable
-single-fold EXP/CEXP driver behind the finished fold-10 rerun — see § Results log.)
+**Batch 3 — follow-up: DGN BREC canonicalization ablation** (running on cuda:1, 2026-07-28).
+Code committed: `BRECDataset(canonical=False)` + `dgn/gin_brec_noncanon.yaml`.
+(`exp_fold_rerun.py`, added alongside, is the reusable single-fold EXP/CEXP driver behind the
+finished fold-10 rerun — see § Results log.)
 
-- **D1 has a GIN control** on the same non-canonical build (`gin_brec_noncanon.yaml`): dropping
+- **The ablation has a GIN control** on the same non-canonical build (`gin_brec_noncanon.yaml`): dropping
   canonicalization changes the RPC statistical regime for *every* model (within-class copies stay
   genuinely permuted → the near-zero within-class covariance behind the S+εI guard becomes a real
   covariance), not just DGN's field. GIN is exactly permutation-invariant, so it isolates the
@@ -548,34 +548,28 @@ single-fold EXP/CEXP driver behind the finished fold-10 rerun — see § Results
   simple-λ₁ graphs should not move; a uniform drop across all categories would indicate the
   regime confound instead.
 
-- [ ] **DGN BREC ablation (D1 running; D2 designed, not implemented): how much of 271.4 is the shared canonicalization?** DGN's Laplacian
-      directional field is computed from `edge_index` by `torch.linalg.eigh`. On the regular BREC
-      families the low-frequency eigenvalues are **degenerate** (repeated), so within the degenerate
-      eigenspace "which vector is the eigenvector" is mathematically arbitrary — this is exactly the
-      pathology the DGN paper flags when it calls the spectral field "unusable" on symmetric graphs
-      (it substitutes image coordinates on CIFAR10 for this reason: grid symmetry makes λ₁
-      degenerate). Two effects can rescue it in our pipeline: **(A)** `eigh` is deterministic, so the
-      same matrix always yields the same basis; **(B)** the shared canonicalization gives isomorphic
-      copies the *same* labelled matrix, so the field becomes isomorphism-invariant (which the RPC
-      reliability control rewards). The committed DGN 271.4 (≈ published 3-WL/PPGN level) benefits
-      from both — i.e. our shared preprocessing turns the paper's "unusable" field into a legitimate
-      invariant feature, which must be disclosed (it already is, in the BREC results-log row). Two
-      ablations to quantify the split, DGN-only, BREC-only, everything else at the committed
-      64×8/BN-on/S+εI/10-seed setting:
-      - **D1 (remove B, keep A):** build BREC **without** canonicalization (raw graph6 order), keep
-        deterministic `eigh`. The field stays learnable per graph but is no longer consistent across
-        the 32 permuted copies → expect reliability to start failing and the score to drop. Isolates
-        how much came from the invariance (B).
-      - **D2 (remove A, approach the paper's pathology):** keep canonicalization but **randomize
-        inside the degenerate eigenspace** (random orthogonal rotation + sign flip on the near-equal
-        eigenvalue groups), restoring the arbitrariness the paper assumes → expect the regular
-        families to collapse toward DGN's true unaided level. Isolates the deterministic solver (A).
-      Implementation sketch (reverted last time): a `canonical` flag on `BRECDataset` (distinct
-      processed-cache filename + a separate `data/brec_noncanon` root so the main cache is untouched)
-      for D1; a degenerate-subspace randomizer in `add_eig_vec` gated behind a flag for D2. Intent is
-      **honest attribution, not to depress DGN** — if DGN stays strong, report that. It also
-      strengthens the LDNA story: LDNA's 122.8 comes purely from its own rank-gate, not from this
-      incidental spectral boost.
+- [ ] **DGN BREC canonicalization ablation (running): how much of 271.4 is the shared
+      canonicalization?** DGN's Laplacian directional field is computed from `edge_index` by
+      `torch.linalg.eigh`. On the regular BREC families the low-frequency eigenvalues are
+      **degenerate**, so within the degenerate eigenspace "which vector is the eigenvector" is
+      mathematically arbitrary — the pathology the DGN paper flags when it calls the spectral
+      field "unusable" on symmetric graphs (it substitutes image coordinates on CIFAR10 for this
+      reason). In our pipeline the deterministic `eigh` plus the shared canonicalization resolve
+      the arbitrariness: isomorphic copies get the same labelled matrix, hence the same basis,
+      and the field becomes an isomorphism-invariant feature. The committed DGN 271.4
+      (≈ published 3-WL/PPGN level) benefits from this, disclosed in the BREC results-log row.
+      The ablation evaluates DGN on BREC built **without** canonicalization
+      (`BRECDataset(canonical=False)`, `dgn_brec_noncanon.yaml`) — the benchmark's **own
+      raw-graph6 construction**, i.e. the setting DGN would face in a standard BREC evaluation —
+      with everything else at the committed 64×8/BN-on/S+εI/10-seed setting, plus the GIN
+      regime-change control above. Intent is **honest attribution, not to depress DGN** — if DGN
+      stays strong, report that. It also sharpens the LDNA story: LDNA's 122.8 comes purely from
+      its own rank-gate, not from this incidental spectral boost. A finer split (randomizing the
+      degenerate eigenbasis while keeping canonicalization) was considered and **rejected**:
+      per-copy randomization inside a shared-canonicalization pipeline ablates the pipeline's
+      defining property — a standard not applied to LDNA's equally-arbitrary canonical rank
+      either — and corresponds to no setting anyone would run; the benchmark's own construction
+      is the meaningful reference point.
 
 ---
 
