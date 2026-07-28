@@ -30,7 +30,8 @@
   jobs on one card. All outputs (logs + checkpoints) live under `out/`.
 - LDNA aggregation is rank-gated: `LDNAConv` builds each message from `[x_i, x_j, edge_attr]`
   via an MLP and scales it by a learned gate `1 + gate_nn([δ, |δ|, sign(δ)])` of the
-  canonical-rank gap δ = nrank_j − nrank_i (zero-init output layer → identity at init).
+  canonical-rank gap δ = nrank_j − nrank_i (zero-init output layer → identity at init;
+  an optional `gate_init_std` starts it slightly off identity, synthetic-expressiveness only).
   `LDNA` computes the per-node rank under a `rank_mode` knob: `feature` (tie-aware dense rank
   over the lexsorted feature order; the default) or `position` (intra-graph position for
   datasets whose node order is canonical by construction — code2's AST DFS order; used by

@@ -167,8 +167,8 @@ if __name__ == '__main__':
     parser.add_argument('--mem_fraction', default=0.30, type=float)
     parser.add_argument('--seed', default=42, type=int)
 
-    # BREC-specific: the RPC-protocol rerun seeds, the S_epsilon covariance guard, and a pair cap
-    # for smoke/debug (0 = all SAMPLE_NUM pairs).
+    # BREC-specific: the RPC-protocol rerun seeds, the S_epsilon covariance guard, and a
+    # per-category pair cap for smoke/probing (0 = all SAMPLE_NUM pairs).
     parser.add_argument('--seeds', default=None, type=int, nargs='+')
     parser.add_argument('--s_epsilon', default=True, type=yaml.safe_load)
     parser.add_argument('--pair_limit', default=0, type=int)

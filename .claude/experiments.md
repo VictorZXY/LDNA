@@ -114,7 +114,10 @@ queue, node-level infrastructure). Loaders are from `torch_geometric.datasets` /
 >   throughout, so BN-on distinctions are not artifacts. Backbone is **64 hidden × 8 layers**
 >   (shared), chosen by a pre-committed probe sweep over {64×4, 128×4, 64×8, 128×8} on 20 pairs
 >   × 3 seeds (per-seed totals [3,3,4] / [3,2,2] / [5,5,5] / [3,4,3]; depth helps, extra width
->   hurts inside the step budget); DGN runs and GIN stays 0 at that size. Results go to
+>   hurts inside the step budget); DGN runs and GIN stays 0 at that size. `gate_init_std`
+>   (`ldna_brec_gateinit.yaml`) is **LDNA-internal**, not a shared knob — no baseline has a gate;
+>   it is the same category of knob as `rank_mode`, and both LDNA numbers (zero-init and
+>   gate-init) are reported side by side. Results go to
 >   `out/logs/<name>_results.json` (the Logger's train/val/test shape does not fit).
 > - **EXP deviations from the source protocol** (recorded, all shared across models): `attention`
 >   readout per the repo-wide shared protocol (paper: max-pool); scheduler steps on val accuracy
@@ -572,6 +575,27 @@ finished fold-10 rerun — see § Results log.)
       defining property — a standard not applied to LDNA's equally-arbitrary canonical rank
       either — and corresponds to no setting anyone would run; the benchmark's own construction
       is the meaningful reference point.
+
+**Batch 3 — follow-up: LDNA gate-init on BREC (in flight 2026-07-28).**
+
+- [ ] **Does a small random gate init lift LDNA's BREC score?** The zero-init identity gate means
+      two 1-WL-equivalent graphs embed identically at step 0, and the RPC per-pair budget
+      (20 epochs, lr 1e-4) must first push the gate off identity before any separating signal
+      exists. `LDNAConv(gate_init_std)` draws the gate output layer from N(0, σ²) instead
+      (default 0.0 = byte-identical previous behavior, no RNG consumed); permutation invariance
+      and the ≥1-WL family property are untouched, and reliability is structurally clean — the
+      canonicalized copies embed identically under *any* parameters. **Scoped by the user as
+      BREC-only, NOT an escalation** — no propagation to graph-level or node-level configs.
+      **Pre-committed probe protocol:** σ ∈ {0.001, 0.01, 0.1}; per-category pair cap 20
+      (120 pairs spanning all six families); protocol seeds {100, 200, 300}; deciding metric =
+      mean reliability-clean correct; ties → the smaller σ. Zero-init baseline on the same 120
+      pairs is read from the committed `ldna_brec_results.json` correct_lists (no rerun). Full
+      run at the chosen σ: 400 pairs × 10 seeds (`ldna_brec_gateinit.yaml`), reported
+      **alongside** (not replacing) the committed zero-init 122.8. Disclosure: the gate draw
+      shifts the RNG stream for every module reset after it, so gate-init vs zero-init at a fixed
+      protocol seed is not single-factor — attribute only deltas exceeding the committed ±9.2
+      spread. (An earlier Basic-only 20-pair probe, run before pair_limit became per-category,
+      is superseded by this protocol.)
 
 ---
 

@@ -133,7 +133,8 @@ def evaluate(model, dataset, device, seed=SEED, s_epsilon=True, pair_limit=0):
     ReduceLROnPlateau, <=20 epochs, early stop at loss < 0.2) -> Hotelling T^2 on the 64-copy
     traintest block and on the reliability block -> distinguished iff T^2_traintest > THRESHOLD and
     T^2_traintest not close to T^2_reliability; reliability failure iff T^2_reliability >= THRESHOLD.
-    `pair_limit > 0` caps the evaluated pair ids (for smoke/debug); `0` runs all `SAMPLE_NUM`.
+    `pair_limit > 0` caps the pairs evaluated per category (for smoke/probing); `0` runs all
+    `SAMPLE_NUM`.
     """
     torch_geometric.seed_everything(seed)
     torch.backends.cudnn.deterministic = True
@@ -147,10 +148,10 @@ def evaluate(model, dataset, device, seed=SEED, s_epsilon=True, pair_limit=0):
     per_category = {}
 
     for part_name, (part_start, part_end) in PART_DICT.items():
+        # The cap is per category, so a small pair_limit still spans all six families instead of
+        # collapsing to a prefix of Basic — a probe must see the families a knob is meant to move.
         if pair_limit:
-            part_end = min(part_end, pair_limit)
-        if part_end <= part_start:
-            continue
+            part_end = min(part_end, part_start + pair_limit)
 
         cnt_part = 0
         fail_part = 0

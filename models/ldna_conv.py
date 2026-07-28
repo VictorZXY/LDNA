@@ -7,12 +7,17 @@ from torch_scatter import scatter
 
 class LDNAConv(MessagePassing):
     def __init__(self, in_channels, out_channels, edge_dim=None, num_pre_layers=1, num_post_layers=1,
-                 gate_hidden_channels=32, **kwargs):
+                 gate_hidden_channels=32, gate_init_std=0.0, **kwargs):
         super(LDNAConv, self).__init__(aggr=None, **kwargs)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.edge_dim = edge_dim
+        # float() guards the YAML-1.1 gotcha where a bare `1e-1` in a config parses as a string;
+        # rejecting negatives keeps a sign typo from silently falling through to the zero-init path.
+        self.gate_init_std = float(gate_init_std)
+        if self.gate_init_std < 0:
+            raise ValueError(f"Argument `gate_init_std` must be >= 0, got {self.gate_init_std}")
 
         if edge_dim is not None:
             self.pre_nn = MLP(in_channels=2 * in_channels + edge_dim, hidden_channels=in_channels,
@@ -44,9 +49,17 @@ class LDNAConv(MessagePassing):
         self.post_nn.reset_parameters()
         # Start the gate at 1 so the conv begins as a plain sum aggregator. The first layer is
         # reset normally; zeroing the second layer makes gate_nn(feats) = 0 for any input, hence
-        # `gate = 1 + gate_nn(feats) = 1` at init.
+        # `gate = 1 + gate_nn(feats) = 1` at init. A non-zero `gate_init_std` instead draws that
+        # layer's weight from N(0, std²) (bias stays 0) so the gate starts slightly off identity:
+        # on the synthetic expressiveness benchmarks an exact-identity start gives two
+        # 1-WL-equivalent graphs identical embeddings at step 0, and the pairwise protocol's short
+        # budget must first push the gate off identity before any separating signal exists. The
+        # default 0.0 keeps every existing config byte-identical (and consumes no RNG).
         self.gate_nn[0].reset_parameters()
-        nn.init.zeros_(self.gate_nn[2].weight)
+        if self.gate_init_std > 0:
+            nn.init.normal_(self.gate_nn[2].weight, std=self.gate_init_std)
+        else:
+            nn.init.zeros_(self.gate_nn[2].weight)
         nn.init.zeros_(self.gate_nn[2].bias)
 
     def forward(self, x, edge_index, edge_attr=None, nrank=None):
