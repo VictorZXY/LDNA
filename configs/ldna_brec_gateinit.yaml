@@ -1,0 +1,36 @@
+experiment_name: ldna_brec_gateinit
+
+# LDNA BREC with a small random gate init (gate_init_std) instead of the exact-identity zero init.
+# The zero-init start gives two 1-WL-equivalent graphs identical embeddings at step 0, so the RPC
+# protocol's short per-pair budget must first push the gate off identity before any separating
+# signal exists; a small random draw on the gate output layer removes that saddle without touching
+# the model family, its permutation invariance, or the data pipeline. LDNA-internal
+# starting-point choice, synthetic benchmarks only — every other config keeps the zero-init
+# default. std = best of the pre-committed grid {0.001, 0.01, 0.1} (a grid-boundary optimum) on
+# the per-category probe (20 pairs x all 6 families = 120, seeds {100, 200, 300}): means
+# 69.0 / 98.0 / 106.0 vs 46.7 for the sigma = 0 arm under the same capped protocol; reliability
+# failures 0 in every arm.
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+  rank_mode: position
+  gate_init_std: 0.1
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 1
+seed: 42
+s_epsilon: true
+log_dir: out/logs/
