@@ -12,11 +12,11 @@ from torch_geometric.datasets import MNISTSuperpixels, ZINC
 from torch_geometric.loader import DataLoader
 
 import models
-from utils import add_eig_vecs, canonicalize_graphs, degree_histogram, sort_graphs
-from utils.code2 import encode_y_to_arr, get_vocab_mapping
+from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, sort_graphs
+from data_utils.code2 import encode_y_to_arr, get_vocab_mapping
+from data_utils.exp import PlanarSATPairsDataset
+from data_utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
 from utils.evaluator import AccuracyEvaluator, Code2Evaluator, MNISTEvaluator, ZINCEvaluator
-from utils.exp import PlanarSATPairsDataset
-from utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
 
 
 def _planar_cv_folds(dataset, batch_size, num_folds=10):

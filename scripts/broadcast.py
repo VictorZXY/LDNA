@@ -10,8 +10,8 @@ is created from the GINE/GIN template.
 This edits configs in place via targeted line replacement (keeps comments/formatting) and
 round-robins the `cuda` field across the given GPUs so the runs can be launched in parallel.
 
-Usage:
-  python broadcast.py --dataset ogbg-molhiv --hidden_channels 256 --num_layers 4 \
+Usage (from the repo root):
+  python scripts/broadcast.py --dataset ogbg-molhiv --hidden_channels 256 --num_layers 4 \
       --dropout 0.05 --lr 6.5e-5 --weight_decay 3e-4 --gpus 0,1,2,3 [--runs 5] [--dry_run]
 """
 import argparse

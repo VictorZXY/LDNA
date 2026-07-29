@@ -7,7 +7,7 @@ from torch_geometric.data import InMemoryDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils.convert import from_networkx
 
-from utils import canonicalize_graph
+from data_utils import canonicalize_graph
 
 # BREC RPC (Reliable Paired Comparison) protocol constants, kept verbatim from the reference
 # `base/test_BREC.py` so this evaluator reproduces the published test exactly.

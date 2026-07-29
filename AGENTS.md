@@ -54,17 +54,18 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 - `train.py`: main training entry point.
 - `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports `ogbg-molhiv`, `ogbg-molpcba`, and `ZINC`.
 - `models/`: LDNA model code (`ldna_conv.py`, `ldna_net.py`), the shared node-feature `Encoder` (`encoder.py`), and baseline GNN model wrappers.
+- `data_utils/`: dataset-side code — `preprocess.py` (graph sorting/canonicalization, DGN eigenvector field, degree histogram), `transforms.py` (small transforms), `exp.py` (EXP/CEXP dataset), `brec.py` (BREC dataset + RPC evaluation core), `code2.py` (ogbg-code2 target-sequence utilities). Its `__init__.py` carries the torch>=2.6 `torch.load` compatibility shim.
 - `utils/resolver.py`: loads datasets, applies preprocessing, and builds the requested model.
-- `utils/_utils.py`: graph sorting and dataset-side preprocessing support.
-- `utils/transforms.py`: small transforms.
 - `utils/evaluator.py` and `utils/logger.py`: evaluators and training logs.
+- `utils/tee.py`: tees run output to a log file.
+- `scripts/`: operational helpers run from the repo root — `broadcast.py` (write tuned shared knobs into all baseline configs), `run_jobs.sh` (run configs serially on one GPU).
 - `configs/`: YAML experiment configs.
 - `.claude/`: agent-facing project notes.
 
 Important architecture notes:
 
 - Canonical sorting means each graph is put into a fixed, reproducible node order before model execution. The ordering rule is a design choice, not a tuned hyperparameter — the only requirement is that a consistent order is imposed.
-- The current implementation (`utils/_utils.py:sort_graph`) sorts nodes lexicographically by their feature columns, remaps and re-sorts `edge_index`/`edge_attr`, and records the permutation as `new2old` / `old2new`.
+- The current implementation (`data_utils/preprocess.py:sort_graph`) sorts nodes lexicographically by their feature columns, remaps and re-sorts `edge_index`/`edge_attr`, and records the permutation as `new2old` / `old2new`.
 - Sorting is applied once during dataset preparation from `utils/resolver.py` (`sort_graphs`), on the data side rather than inside the model.
 
 ---

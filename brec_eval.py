@@ -9,8 +9,9 @@ from configargparse import YAMLConfigFileParser
 from torch import nn
 
 import models
-from utils import add_eig_vecs, degree_histogram, tee_to_file
-from utils.brec import BRECDataset, OUTPUT_DIM, SEEDS, evaluate
+from data_utils import add_eig_vecs, degree_histogram
+from data_utils.brec import BRECDataset, OUTPUT_DIM, SEEDS, evaluate
+from utils import tee_to_file
 
 
 class BRECModel(nn.Module):
@@ -98,7 +99,7 @@ def main(args):
             torch.cuda.set_per_process_memory_fraction(args.mem_fraction, device.index)
 
         model_args = args.model_args or {}
-        # batch_size is protocol-fixed (BATCH_SIZE = 16 in utils/brec.py), so it is not a data knob.
+        # batch_size is protocol-fixed (BATCH_SIZE = 16 in data_utils/brec.py), so it is not a data knob.
         data_args = dict(args.data_args or {})
         data_args.pop('batch_size', None)
 

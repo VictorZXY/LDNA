@@ -10,8 +10,9 @@
 ## Current progress
 - The repository is a usable experiment runner (not a packaged project): `train.py`
   (training loop), `configs/` (YAML experiments), `models/` (LDNA — `ldna_conv.py` /
-  `ldna_net.py` — plus the baseline wrappers), `utils/` (dataset loading/sorting, resolver,
-  evaluators, logger), and `requirements.txt`. Current contents are graph-level only.
+  `ldna_net.py` — plus the baseline wrappers), `data_utils/` (sorting/canonicalization,
+  transforms, dataset classes), `utils/` (resolver, evaluators, logger, tee), `scripts/`
+  (operational helpers), and `requirements.txt`. Current contents are graph-level only.
 - `hyperparam_search.py` tunes LDNA on all five graph-level datasets (ogbg-molhiv,
   ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2). Search mechanics — ranges, pruning,
   plateau early-stopping, the 50-epoch search cap (vs 150 final), and gradient clipping —
@@ -55,7 +56,7 @@
   is a correctness requirement, not a performance lever). Both are covered in
   `.claude/experiments.md` § Datasets.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
-  `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
+  `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
 - Expressiveness result (established; write-up lives in the git-ignored paper-prep area,
   not in project files). Proof idea on record:
@@ -82,10 +83,10 @@
   gate-init variant, with zero-init 122.8 kept alongside) while GIN sits on it exactly
   (0.50 / 0.75 / 0) and DGN saturates EXP/CEXP and scores BREC **144.4** official (271.4 under
   shared canonicalization). These datasets are featureless, so the permutation-invariance device
-  is a nauty canonical labelling (`utils/_utils.py: canonicalize_graph(s)`) read by LDNA via
+  is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via
   `rank_mode: position`; the model set is LDNA + GIN + DGN and there is no hyperparameter search
   (protocol constants). EXP/CEXP run through the standard loop (10-fold CV); BREC uses a
-  dedicated entry point (`brec_eval.py`, `utils/brec.py`). Full results, the DGN BREC
+  dedicated entry point (`brec_eval.py`, `data_utils/brec.py`). Full results, the DGN BREC
   canonicalization ablation, and all protocol decisions are in `.claude/experiments.md`
   (§ Results log, § Datasets → batch-3 notes, § Experiment queue).
 
@@ -96,10 +97,11 @@
   rank → log) has been run on all five datasets, plus the `DGN` baseline. Objectives, the
   per-dataset tuned configs, and final rankings live in `.claude/experiments.md`
   (§ Experiment queue, § Results log), the source of truth.
-- Helper scripts: `broadcast.py` writes the tuned shared knobs into every baseline config
-  and creates the `GNN-VPA` config (`python broadcast.py --dataset <D> --hidden_channels ..
-  --num_layers .. --dropout .. --lr .. --weight_decay .. --gpus 0,1,2,3`); `run_jobs.sh`
-  runs a set of configs serially on one GPU (launch several for concurrency).
+- Helper scripts (in `scripts/`): `scripts/broadcast.py` writes the tuned shared knobs into
+  every baseline config and creates the `GNN-VPA` config (`python scripts/broadcast.py
+  --dataset <D> --hidden_channels .. --num_layers .. --dropout .. --lr .. --weight_decay ..
+  --gpus 0,1,2,3`); `scripts/run_jobs.sh` runs a set of configs serially on one GPU (launch
+  several for concurrency).
 - GPU policy: prefer idle GPUs, keep them busy, share freely, never OOM anyone (see
   `.claude/experiments.md` § Compute & parallelism).
 - Compute spans two machines: local `ee-kraken` (4× RTX A6000 49GB) and remote `ee-tiamat`

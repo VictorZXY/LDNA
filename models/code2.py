@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 # ogbg-code2 model components: the AST node encoder and the sequence-prediction head wrapper.
-# Both are code2-specific, so they live together here (mirroring the data-side utils/code2.py)
+# Both are code2-specific, so they live together here (mirroring the data-side data_utils/code2.py)
 # rather than polluting the shared models/encoder.py.
 
 

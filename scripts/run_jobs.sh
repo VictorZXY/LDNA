@@ -2,7 +2,7 @@
 # Run a list of train.py ranking configs sequentially on ONE GPU, so a freed GPU can
 # auto-chew through a partition of the ranking queue without babysitting each run.
 #
-# Usage: bash run_jobs.sh <gpu_id> <config1.yaml> [config2.yaml ...]
+# Usage: bash scripts/run_jobs.sh <gpu_id> <config1.yaml> [config2.yaml ...]
 # Each run: train.py --config <cfg> --cuda <gpu_id> (mem cap via train.py --mem_fraction default;
 # expandable_segments reduces fragmentation on the shared card). Logs to out/logs/<name>.run.log.
 set -u

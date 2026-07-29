@@ -1,6 +1,6 @@
 from ogb.graphproppred import Evaluator as _OGBEvaluator
 
-from utils.code2 import decode_arr_to_seq
+from data_utils.code2 import decode_arr_to_seq
 
 
 class Code2Evaluator:

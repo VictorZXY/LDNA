@@ -77,12 +77,12 @@ queue, node-level infrastructure). Loaders are from `torch_geometric.datasets` /
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
 | `EXP` / `CEXP` | distinguish 1-WL-equivalent pairs | accuracy | max | `AccuracyEvaluator` | done | ported from GNN-RNI (GPL v3 — note on redistribution); 600 pairs each, binary node-type feature, **edge-less** (GIN family); paper's contiguous 10-fold CV, folds map to `runs`; raw pickles under `data/EXP|CEXP/raw/` (gitignored, fetch from the GNN-RNI repo) |
-| `BREC` | pairwise graph distinguishing | # pairs distinguished (RPC protocol) | max | RPC core in `utils/brec.py` | done | dedicated entry point `brec_eval.py` (the train/val/test loop does not fit the pairwise protocol); 400 pairs × 10 seeds; featureless (`x = ones`); `data/brec/raw/brec_v3.npy` from the BREC repo |
+| `BREC` | pairwise graph distinguishing | # pairs distinguished (RPC protocol) | max | RPC core in `data_utils/brec.py` | done | dedicated entry point `brec_eval.py` (the train/val/test loop does not fit the pairwise protocol); 400 pairs × 10 seeds; featureless (`x = ones`); `data/brec/raw/brec_v3.npy` from the BREC repo |
 
 > **Batch-3 protocol decisions (2026-07-27).**
 > - **Canonical order**: these graphs are featureless/uniform, so the feature lexsort cannot impose
 >   an order. The permutation-invariance device is a **nauty canonical labelling**
->   (`utils/_utils.py: canonicalize_graph(s)`, pynauty, data-side, replaces `sort_graphs` on these
+>   (`data_utils/preprocess.py: canonicalize_graph(s)`, pynauty, data-side, replaces `sort_graphs` on these
 >   datasets); LDNA reads it via `rank_mode: position`. Isomorphic graphs get the identical
 >   labelled form, so invariance is exact. Write-up caveat: nauty canonization is
 >   isomorphism-complete — LDNA's beyond-1-WL signal on these benchmarks is the **combination** of
@@ -152,7 +152,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > narrower `post_nn` input (`(3*3+1)*hidden` instead of `(5*3+1)*hidden`) puts DGN at ~0.73x
 > `PNA`'s parameter count and ~3.0x LDNA's, rather than ~1.05x PNA's.
 
-> **DGN needs a precomputed eigenvector field.** `utils/_utils.py: add_eig_vecs` attaches a
+> **DGN needs a precomputed eigenvector field.** `data_utils/preprocess.py: add_eig_vecs` attaches a
 > per-node `eig_vec` to the data, and `train.py` forwards it only when present — the resolver
 > attaches it only for `DGN`, so its presence is the routing switch and the other baselines'
 > call path is untouched. Two ordering constraints are load-bearing: the field is computed
@@ -180,7 +180,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > num_nodes - 1` for all 452,741), so on the symmetrized edge set `|depth_j − depth_i| = 1`
 > everywhere and the field's gradient is exactly the parent/child orientation — after
 > `ToUndirectedNoAttr`, `dir1-dx` is the only aggregator in the code2 lineup that can tell a
-> message from the parent apart from one from a child. `utils/transforms.py: AddDepthField`
+> message from the parent apart from one from a child. `data_utils/transforms.py: AddDepthField`
 > attaches it inside the existing lazy chain (a view and a cast, so no precompute and no cache),
 > gated on `model_query == 'DGN'`; `Code2Head.forward` and the two code2 call sites in `train.py`
 > forward it. The eigenvector alternative was measured and rejected: it is *feasible* (sparse
@@ -224,7 +224,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
 > `edge_attr`). The rule is realized by the **config inventory**: each dataset ships only
 > `gine_<suffix>.yaml` (edge) *or* `gin_<suffix>.yaml` (edge-less), never both — currently
-> `gine_{hiv,molpcba,zinc}` and `gin_mnist` (code2 → `gin`). `broadcast.py` globs
+> `gine_{hiv,molpcba,zinc}` and `gin_mnist` (code2 → `gin`). `scripts/broadcast.py` globs
 > `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
 > selects the matching GINE/GIN template for the `GNN-VPA` config the same way.
 
@@ -288,7 +288,7 @@ explain an LDNA win. A genuine LDNA advantage must come from LDNA-specific struc
 Invariants that must hold through every escalation (else the comparison is unfair or
 the method is no longer LDNA):
 
-- The **canonical-sort premise** stays (`utils/_utils.py`).
+- The **canonical-sort premise** stays (`data_utils/preprocess.py`).
 - The **shared interface** `forward(x, edge_index, edge_attr, batch)` /
   `reset_parameters()` stays, so the resolver and the baseline comparison keep working.
 - **Dataset splits/preprocessing stay**, and **baselines are never modified** to
@@ -387,7 +387,7 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
   transductive accuracy; BREC's pairwise protocol). Define when implementing.
 - "Non-trivial margin": SEM-based; defined in § Objective.
 - **Run logs:** every `train.py` run tees its stdout to `out/logs/<experiment_name>.txt`
-  (built into `train.py`); when launched via `run_jobs.sh` the same output (plus stderr) is
+  (built into `train.py`); when launched via `scripts/run_jobs.sh` the same output (plus stderr) is
   also captured to `out/logs/<experiment_name>.run.log` — a near-duplicate of the `.txt`
   (only extra content is a `pkg_resources` deprecation warning). The final numbers are also
   pickled to `out/logs/<experiment_name>_logger.pickle`.
@@ -446,7 +446,7 @@ Mirror of `AGENTS.md` (§ Autonomous optimization); concrete limits here.
   validation metric saturates. `batch_size` is a fixed per-dataset power of 2, not
   searched (see § Search spaces). Set a wall-clock ceiling per search and stop if exceeded.
 - **Always off-limits** (every phase): the **canonical-sort premise**
-  (`utils/_utils.py`); the **shared model interface**
+  (`data_utils/preprocess.py`); the **shared model interface**
   `forward(x, edge_index, edge_attr, batch)` / `reset_parameters()`; **dataset
   splits/preprocessing**; **baseline model code**.
 - **LDNA internal architecture** is off-limits **during tuning**, but IS in-scope as
@@ -477,7 +477,7 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 **Graph-level (do these first, in order):**
 
 - [x] Graph-level pipeline infrastructure complete — `GNN-VPA` baseline (`models/vpa.py`),
-      the `ogbg-code2` edge-less pipeline (`utils/code2.py`, `models/code2.py`,
+      the `ogbg-code2` edge-less pipeline (`data_utils/code2.py`, `models/code2.py`,
       guarded `train.py`/`hyperparam_search.py` fork), and `hyperparam_search.py` extended to all
       five graph-level datasets. Details in `.claude/project_state.md` § Current progress.
 - [x] **Run the graph-level experiment protocol** (see § Experiment queue) on every
@@ -496,7 +496,7 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 **Expressiveness (custom evaluation):**
 
 - [x] Add `EXP` / `CEXP` (ported dataset + the paper's 10-fold CV; `AccuracyEvaluator`).
-- [x] Add `BREC` (dataset + ported RPC pairwise evaluation; `utils/brec.py`, `brec_eval.py`).
+- [x] Add `BREC` (dataset + ported RPC pairwise evaluation; `data_utils/brec.py`, `brec_eval.py`).
 - [x] ~~Extend `hyperparam_search.py` to expressiveness datasets~~ — resolved as **not needed**:
       batch-3 hyperparameters are protocol constants (see § Datasets → batch-3 notes). Node-level
       search support still lands with the node-level pipeline.
@@ -508,7 +508,7 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 Runs to do once the code is in place. Keep status current; move finished items to
 the results log.
 
-**Graph-level protocol** (per § Tuning methodology: tune LDNA → `broadcast.py` the tuned
+**Graph-level protocol** (per § Tuning methodology: tune LDNA → `scripts/broadcast.py` the tuned
 shared config to all baselines → run → rank → append to § Results log): **complete on all
 five datasets** — `ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2` —
 plus the `DGN` baseline added afterward. Final rankings in § Results log.
