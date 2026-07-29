@@ -154,9 +154,15 @@ class LDNA(nn.Module):
         size = counts[batch].clamp(min=1.0)
         return (pos / size).unsqueeze(-1)
 
-    def forward(self, x, edge_index, edge_attr, batch):
-        nrank = self._position_rank(x, batch) if self.rank_mode == 'position' \
-            else self._canonical_rank(x, batch)
+    def forward(self, x, edge_index, edge_attr, batch, nrank=None):
+        # Node-level data precomputes the canonical rank once on the full graph (data_utils'
+        # node_rank) and rides it on the batch, because a node-level batch is a slice of one graph
+        # rather than a set of complete graphs — deriving the rank here would rank the slice. This
+        # mirrors DGN's precomputed `eig_vec` kwarg and keeps the shared forward signature additive:
+        # graph-level callers pass nothing and fall through to the per-batch derivation unchanged.
+        if nrank is None:
+            nrank = self._position_rank(x, batch) if self.rank_mode == 'position' \
+                else self._canonical_rank(x, batch)
 
         if self.node_encoder is not None:
             x = self.node_encoder(x)

@@ -1,0 +1,47 @@
+experiment_name: ldna_cora
+
+# SMOKE TEST ONLY -- not a reported result, and never broadcast to baselines.
+# Its job is to prove the node-level path runs end to end: the loss decreases, the split masks are
+# honoured (Cora's public split is 140/500/1000 nodes), and a per-node head is produced without any
+# baseline model change. Its accuracy is NOT a target and these hyperparameters are NOT tuned --
+# real node datasets get their own Optuna search on validation (see .claude/experiments.md
+# § Tuning methodology). Anything near 1.0 here would mean a split leak; that is the only threshold
+# that matters.
+#
+# No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse
+# stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
+model: LDNA
+model_args:
+  hidden_channels: 128
+  out_channels: 128
+  num_layers: 3
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.5
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: Cora
+data_args:
+  root: data/cora/
+
+# Training specific arguments/hyperparameters
+cuda: 0
+mem_fraction: 0.85
+seed: 42
+train_args:
+  runs: 1
+  epochs: 150
+  eval_interval: 10
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 5.0e-4
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

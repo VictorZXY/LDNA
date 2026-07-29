@@ -25,7 +25,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - LDNA is the method studied here. It sorts graph inputs into a canonical order before model execution, then trains a learnable neighborhood aggregation model implemented in code as `LDNA` and `LDNAConv`.
 - The repository is centered on running experiments rather than packaging a reusable library. It compares LDNA against several baseline GNN families under the same general training pipeline.
 - The project runs in a Conda environment named `LDNA`.
-- All current experiments are graph-level. LDNA is not limited to graph-level prediction; node-level experiments are planned future work and are not yet implemented in the code.
+- All reported experiments are graph-level. Node-level (transductive, per-node) prediction is implemented but not yet reported: only the full-graph `Cora` smoke test is wired, and sampling, layer-wise inference, and the remaining node datasets are still to come.
 
 ---
 
@@ -34,6 +34,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - `ogbg-molhiv` and `ogbg-molpcba`: graph-level binary classification.
 - `ZINC`: graph-level regression.
 - `MNISTSuperpixels`: graph-level multi-class classification.
+- `Cora` (Planetoid): node-level multi-class classification, transductive full-graph. A smoke test for the node-level path, not a reported result.
 
 ---
 
@@ -52,9 +53,9 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 ## Repo architecture
 
 - `train.py`: main training entry point.
-- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports `ogbg-molhiv`, `ogbg-molpcba`, and `ZINC`.
+- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports all five graph-level datasets (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`). Node-level search is not wired yet; the expressiveness datasets deliberately have none (their hyperparameters are protocol constants).
 - `models/`: LDNA model code (`ldna_conv.py`, `ldna_net.py`), the shared node-feature `Encoder` (`encoder.py`), and baseline GNN model wrappers.
-- `data_utils/`: dataset-side code â€” `preprocess.py` (graph sorting/canonicalization, DGN eigenvector field, degree histogram), `transforms.py` (small transforms), `exp.py` (EXP/CEXP dataset), `brec.py` (BREC dataset + RPC evaluation core), `code2.py` (ogbg-code2 target-sequence utilities). Its `__init__.py` carries the torch>=2.6 `torch.load` compatibility shim.
+- `data_utils/`: dataset-side code â€” `preprocess.py` (graph sorting/canonicalization, the node-level canonical rank, DGN eigenvector field, degree histogram), `transforms.py` (small transforms), `exp.py` (EXP/CEXP dataset), `brec.py` (BREC dataset + RPC evaluation core), `code2.py` (ogbg-code2 target-sequence utilities). Its `__init__.py` carries the torch>=2.6 `torch.load` compatibility shim.
 - `utils/resolver.py`: loads datasets, applies preprocessing, and builds the requested model.
 - `utils/evaluator.py` and `utils/logger.py`: evaluators and training logs.
 - `utils/tee.py`: tees run output to a log file.

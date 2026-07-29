@@ -108,6 +108,62 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False):
     return dataset
 
 
+def node_rank(graph: Data, rank_mode='feature'):
+    # Per-node canonical rank for node-level (transductive) data, returned as a float in [0, 1) of
+    # shape [N, 1] — the same contract as LDNA._canonical_rank, which this reproduces for a single
+    # graph. It is precomputed here and carried on the data because a node-level model sees the
+    # whole graph (or a sampled subgraph) rather than a batch of complete graphs, so re-deriving the
+    # rank inside the forward would rank a slice instead of the graph.
+    #
+    # Unlike sort_graph, this does NOT permute the graph. The tie-aware dense rank is permutation-
+    # EQUIVARIANT: a node's rank depends only on its own feature row and the multiset of all feature
+    # rows, so relabelling the nodes carries each rank along with its node. The gate reads only
+    # delta = rank_j - rank_i on an edge, and aggregation is a scatter-sum, so both are invariant
+    # under relabelling and the physical order is never observed. The sort in sort_graph exists only
+    # to make _canonical_rank's O(N) "compare adjacent rows + cumsum" trick valid on a batch; here
+    # the same trick runs in lexsort order and the result is scattered back to the original indices.
+    if rank_mode != 'feature':
+        raise ValueError(f"Argument `rank_mode` must be 'feature' for node-level data, got "
+                         f"'{rank_mode}': a position rank presumes a canonical construction order, "
+                         f"which a single transductive graph does not have")
+
+    n = graph.num_nodes
+    if n == 0:
+        return graph.x.new_zeros((0, 1), dtype=torch.float)
+
+    x_arr = graph.x.numpy()
+    sorted_idx = np.lexsort([x_arr[:, i] for i in range(x_arr.shape[1])])
+    sorted_idx = torch.from_numpy(sorted_idx).long()
+
+    # Dense rank in lexicographic order: increment only where the ENTIRE feature row differs from
+    # its predecessor, so nodes the sort cannot separate share a rank. That shared rank is what
+    # makes the result independent of how the tie was broken, hence permutation-invariant.
+    xf = graph.x[sorted_idx].view(n, -1)
+    changed = torch.zeros(n, dtype=torch.bool)
+    changed[1:] = (xf[1:] != xf[:-1]).any(dim=1)
+    rank = torch.cumsum(changed.long(), dim=0).float()
+
+    # Scatter back to the ORIGINAL node indices, then normalize by graph size to match
+    # _canonical_rank's scale-free gap.
+    nrank = torch.empty(n, dtype=torch.float)
+    nrank[sorted_idx] = rank
+
+    return (nrank / n).unsqueeze(-1)
+
+
+def add_node_ranks(dataset: InMemoryDataset, rank_mode='feature'):
+    # Multi-graph node-level datasets (PPI): the rank is computed PER GRAPH, never once across the
+    # collated store, since a rank shared across graphs would compare feature rows that no edge
+    # connects. Follows add_eig_vecs' materialize -> mutate -> collate shape but keeps no disk
+    # cache: a lexsort is cheaper to recompute than a cache key hashed over every feature row.
+    all_graphs = [dataset.get(i) for i in range(len(dataset))]
+    for graph in all_graphs:
+        graph.nrank = node_rank(graph, rank_mode)
+
+    dataset.data, dataset.slices = dataset.collate(all_graphs)
+    return dataset
+
+
 def add_eig_vec(graph: Data, k=1):
     # DGN's directional aggregators need the k lowest-frequency non-trivial eigenvectors of the
     # combinatorial Laplacian L = D - A. PyG's AddLaplacianEigenvectorPE is deliberately not used:

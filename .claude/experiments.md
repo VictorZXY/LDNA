@@ -61,9 +61,10 @@ exists but not tuned/run; `todo` = not implemented.
 
 ### 2. Node-level prediction
 
-Node-level tasks are **not yet supported by the pipeline** (see § Implementation
-queue, node-level infrastructure). Loaders are from `torch_geometric.datasets` /
-`ogb.nodeproppred`.
+The node-level **pipeline is implemented** (transductive masked training loop, per-node head
+via `readout=None`, precomputed canonical rank); of the datasets below **none is wired yet** —
+only the unreported `Planetoid` Cora smoke test is. Sampling and layer-wise inference are still
+to come. Loaders are from `torch_geometric.datasets` / `ogb.nodeproppred`.
 
 Five reported datasets, matching the graph-level count, listed in **priority order** (cut
 the last one first if the budget shrinks). Sizes below are from the PyG/OGB metadata.
@@ -556,11 +557,13 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 **Node-level (needs new infrastructure):**
 
-- [ ] **Node-level infrastructure**: resolver branches for node datasets; a node-mode
-      LDNA/baseline path (no graph pooling — per-node prediction head); transductive
-      training loop with train/val/test masks; neighbor sampling for large graphs;
-      full-graph precomputation of the canonical rank (§ Datasets → node-level notes).
-- [ ] `Planetoid` Cora — smoke test for the node path only; not reported.
+- [x] **Node-level infrastructure (core, 2026-07-29)**: resolver node branch + the readout
+      level guard, a per-node head via `readout=None` (no baseline model file touched),
+      the transductive masked training loop (`_split_mask` applied *before* the NaN
+      filter), full-graph precomputation of the canonical rank without permuting
+      (`data_utils/preprocess.py: node_rank` / `add_node_ranks`), and the three node
+      evaluators. **Still to come**: GraphSAINT sampling and layer-wise exact inference.
+- [x] `Planetoid` Cora — smoke test for the node path only; not reported.
 - [ ] Add `ogbn-arxiv` (OGB split + evaluator; full-graph run plus the sampled control).
 - [ ] Add `ogbn-products` (neighbor sampling; OGB evaluator).
 - [ ] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator).

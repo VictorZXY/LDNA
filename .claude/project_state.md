@@ -12,7 +12,7 @@
   (training loop), `configs/` (YAML experiments), `models/` (LDNA — `ldna_conv.py` /
   `ldna_net.py` — plus the baseline wrappers), `data_utils/` (sorting/canonicalization,
   transforms, dataset classes), `utils/` (resolver, evaluators, logger, tee), `scripts/`
-  (operational helpers), and `requirements.txt`. Current contents are graph-level only.
+  (operational helpers), and `requirements.txt`.
 - `hyperparam_search.py` tunes LDNA on all five graph-level datasets (ogbg-molhiv,
   ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2). Search mechanics — ranges, pruning,
   plateau early-stopping, the 50-epoch search cap (vs 150 final), and gradient clipping —
@@ -55,6 +55,24 @@
   feature-based sort non-permutation-invariant, which LDNA's MLP aggregator requires (the sort
   is a correctness requirement, not a performance lever). Both are covered in
   `.claude/experiments.md` § Datasets.
+- Node-level (transductive, per-node) prediction is wired end to end, without sampling or
+  layer-wise inference: `data_utils/preprocess.py: node_rank` / `add_node_ranks` compute the
+  tie-aware canonical rank **without permuting the graph** (the rank is permutation-equivariant,
+  so the per-edge gap δ and the scatter-sum are invariant regardless of node labelling; the
+  physical sort exists only to make `_canonical_rank`'s adjacent-row trick valid on a batch).
+  `LDNA.forward` takes an additive `nrank=None` kwarg mirroring DGN's `eig_vec`; `train.py` gains
+  `_nrank_kwargs` / `_split_mask` and applies the split mask **before** the `is_labelled` NaN
+  guard (that guard is molpcba's missing-label filter, not a split selector); the resolver adds a
+  `NODE_DATASETS` branch, a `FullGraphLoader`, and a single `readout` guard rejecting an
+  unrecognized value and each direction of a node-vs-graph-level mismatch. The guard judges the
+  value the **config** supplied, captured before the node branch overwrites it — checking the
+  post-update value would pass any node config, since that branch sets `readout=None`
+  unconditionally. `readout=None` is set by the resolver, not by YAML, because configargparse
+  delivers a YAML `null` as the string `'None'`. No baseline
+  model file was touched — their readout chains are `if`/`elif` with no `else`, so `readout=None`
+  already yields per-node output. Evaluators added: `OGBNodeEvaluator`, `ROCAUCEvaluator`,
+  `MicroF1Evaluator`; `AccuracyEvaluator` gained a `.view(-1)` fixing an `[N]`-vs-`[N,1]`
+  broadcast. Only `Cora` is wired so far (`configs/ldna_cora.yaml`), as an unreported smoke test.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -115,7 +133,9 @@
 
 ## Partial or missing components
 - `README.md` is a title stub; it does not explain the project or its setup/usage.
-- Node-level task support is not implemented yet (planned future work).
+- Node-level support covers only the full-graph transductive case on `Cora`. Sampling
+  (GraphSAINT), layer-wise exact inference, the remaining datasets (ogbn-arxiv, Questions, PPI,
+  ogbn-products), and the tune → broadcast → rank protocol are not implemented yet.
 
 ---
 

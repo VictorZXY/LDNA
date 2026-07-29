@@ -6,6 +6,7 @@ torch_scatter
 torch_sparse
 torch_cluster
 ogb
+scikit-learn
 optuna
 configargparse
 pyyaml

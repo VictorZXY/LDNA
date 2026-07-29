@@ -20,6 +20,22 @@ def _eig_kwargs(batch):
     return {'eig_vec': batch.eig_vec} if hasattr(batch, 'eig_vec') else {}
 
 
+def _nrank_kwargs(batch):
+    # Node-level data carries a canonical rank precomputed on the full graph, since a node-level
+    # batch is a slice of one graph and the model would otherwise rank the slice. The resolver
+    # attaches `nrank` only for LDNA (the only model that reads it), so its presence is the switch,
+    # exactly as with `eig_vec` above.
+    return {'nrank': batch.nrank} if hasattr(batch, 'nrank') else {}
+
+
+def _split_mask(batch, loader):
+    # Node-level loaders tag themselves with the name of the boolean node mask their split uses
+    # (train_mask / val_mask / test_mask), so the transductive case is the same `for batch in
+    # loader` loop as the graph-level one. Graph-level loaders carry no tag and get a full slice,
+    # which indexes to the identical tensor.
+    return batch[loader.split] if hasattr(loader, 'split') else slice(None)
+
+
 @torch.no_grad()
 def evaluate(model, loader, evaluator, loss_fn, device):
     model.eval()
@@ -29,17 +45,24 @@ def evaluate(model, loader, evaluator, loss_fn, device):
     total_loss = 0
     for batch in loader:
         batch = batch.to(device)
-        out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
+        out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch,
+                    **_eig_kwargs(batch), **_nrank_kwargs(batch))
 
-        y_true.append(batch.y)
+        # The split mask is applied BEFORE the `is_labelled` filter below. That filter is molpcba's
+        # missing-label (NaN) guard, NOT a split selector, so leaving the split to it would score
+        # and train on every node in the graph regardless of split.
+        mask = _split_mask(batch, loader)
+        out, y = out[mask], batch.y[mask]
+
+        y_true.append(y)
         y_pred.append(out)
         if loss_fn is not None:
             if isinstance(loss_fn, nn.CrossEntropyLoss):
-                is_labelled = (batch.y == batch.y).view(-1)
-                loss = loss_fn(out[is_labelled], batch.y[is_labelled].long())
-            else: 
-                is_labelled = (batch.y == batch.y)
-                loss = loss_fn(out[is_labelled], batch.y[is_labelled].float())
+                is_labelled = (y == y).view(-1)
+                loss = loss_fn(out[is_labelled], y[is_labelled].long())
+            else:
+                is_labelled = (y == y)
+                loss = loss_fn(out[is_labelled], y[is_labelled].float())
             total_loss += loss.detach().item()
 
     result_dict = evaluator.eval({
@@ -94,13 +117,21 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
             for batch in train_loader:
                 batch = batch.to(device)
                 optimizer.zero_grad()
-                out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch, **_eig_kwargs(batch))
+                out = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch,
+                            **_eig_kwargs(batch), **_nrank_kwargs(batch))
+
+                # As in evaluate(): the split mask must come BEFORE the `is_labelled` NaN guard,
+                # which selects labelled rows and not a split. Reusing it alone would put the
+                # validation and test labels into the training loss.
+                mask = _split_mask(batch, train_loader)
+                out, y = out[mask], batch.y[mask]
+
                 if isinstance(loss_fn, nn.CrossEntropyLoss):
-                    is_labelled = (batch.y == batch.y).view(-1)
-                    loss = loss_fn(out[is_labelled], batch.y[is_labelled].long())
-                else: 
-                    is_labelled = (batch.y == batch.y)
-                    loss = loss_fn(out[is_labelled], batch.y[is_labelled].float())
+                    is_labelled = (y == y).view(-1)
+                    loss = loss_fn(out[is_labelled], y[is_labelled].long())
+                else:
+                    is_labelled = (y == y)
+                    loss = loss_fn(out[is_labelled], y[is_labelled].float())
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()

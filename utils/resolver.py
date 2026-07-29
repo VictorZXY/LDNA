@@ -1,22 +1,50 @@
 import os
 
 import ogb.graphproppred
-import ogb.nodeproppred
 import pandas as pd
 import torch
 import torch_geometric.transforms as T
 from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from torch import nn
-from torch_geometric.datasets import MNISTSuperpixels, ZINC
+from torch_geometric.datasets import MNISTSuperpixels, Planetoid, ZINC
 from torch_geometric.loader import DataLoader
 
 import models
-from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, sort_graphs
+from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, node_rank, sort_graphs
 from data_utils.code2 import encode_y_to_arr, get_vocab_mapping
 from data_utils.exp import PlanarSATPairsDataset
 from data_utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
-from utils.evaluator import AccuracyEvaluator, Code2Evaluator, MNISTEvaluator, ZINCEvaluator
+from utils.evaluator import (AccuracyEvaluator, Code2Evaluator, MicroF1Evaluator, MNISTEvaluator,
+                             OGBNodeEvaluator, ROCAUCEvaluator, ZINCEvaluator)
+
+# Datasets predicted per node rather than per graph. They take a different route through the
+# resolver — no canonical sort, no graph readout, one graph per "batch" — and the readout guard
+# below keys off this tuple to check that a config has not crossed the two levels.
+NODE_DATASETS = ('Cora',)
+
+# Every model's readout chain is an `if`/`elif` with no `else`, so an unrecognized value does not
+# raise: it silently skips pooling and the model returns one row per node. That is exactly the
+# node-level behaviour, which makes the failure mode invisible at graph level until a metric comes
+# out wrong. The recognized set is listed once here and checked before any model is built.
+READOUT_CHOICES = (None, 'add', 'max', 'mean', 'gru', 'attention')
+
+
+class FullGraphLoader:
+    # Transductive node-level "loader": the whole graph is a single batch, so this is a one-element
+    # iterable rather than a DataLoader. It carries `split` — the name of the boolean node mask that
+    # selects this loader's nodes — which train.py reads to restrict the loss and the metrics to
+    # that split. Wrapping the graph this way keeps the training loop a plain `for batch in loader`
+    # shared with the graph-level path, and keeps `len(loader)` correct for its per-epoch loss mean.
+    def __init__(self, data, split):
+        self.data = data
+        self.split = split
+
+    def __iter__(self):
+        yield self.data
+
+    def __len__(self):
+        return 1
 
 
 def _planar_cv_folds(dataset, batch_size, num_folds=10):
@@ -55,7 +83,8 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
     model_choices = ['LDNA', 'DeeperGCN', 'DGN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
-    dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2', 'EXP', 'CEXP']
+    dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2',
+                       'EXP', 'CEXP'] + list(NODE_DATASETS)
 
     # Load the dataset
     if dataset_query == 'MNISTSuperpixels':
@@ -164,6 +193,23 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # which train.py selects cv_folds[run] per run (folds map one-to-one to runs).
         cv_folds = _planar_cv_folds(dataset, batch_size)
         train_dataset = cv_folds[0][0].dataset
+    elif dataset_query in NODE_DATASETS:
+        # Transductive node classification: one graph, three boolean node masks, no splitting of the
+        # data itself. Deliberately NO sort_graphs — the tie-aware rank is permutation-equivariant,
+        # so the model sees the same rank gaps whether or not the nodes are physically relabelled
+        # (see data_utils.node_rank), and skipping the permutation keeps the masks and `y` aligned
+        # with the nodes without an extra realignment pass.
+        dataset = Planetoid(name=dataset_query, **dataset_kwargs)
+        data = dataset[0]
+
+        # Only LDNA reads the canonical rank, so as with DGN's eigenvector field it is attached only
+        # for LDNA and its presence on the batch is what routes it into the forward.
+        if model_query == 'LDNA':
+            data.nrank = node_rank(data)
+
+        # degree_histogram (PNA/DGN) iterates its argument, and iterating a bare `Data` yields
+        # (key, value) pairs, so the single graph is wrapped in a one-element list.
+        train_dataset = [data]
     else:
         raise ValueError(f"Could not resolve dataset '{dataset_query}' among choices {dataset_choices}")
 
@@ -172,10 +218,22 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     if dataset_query in ['EXP', 'CEXP']:
         train_loader, val_loader, test_loader = cv_folds[0]
         train_loader.cv_folds = cv_folds
+    elif dataset_query in NODE_DATASETS:
+        # All three loaders yield the same full graph and differ only in the split mask they tag,
+        # which is what transductive means here: every node is seen, only the scored ones change.
+        train_loader = FullGraphLoader(data, 'train_mask')
+        val_loader = FullGraphLoader(data, 'val_mask')
+        test_loader = FullGraphLoader(data, 'test_mask')
     else:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # What the CONFIG asked for, captured before the node branch below overwrites it. The guard
+    # further down has to judge this value, not the post-update one: the node branch sets
+    # `readout=None` unconditionally, so checking afterwards would pass any node config, including
+    # one that wrongly carries a graph readout.
+    config_readout = model_kwargs.get('readout', None)
 
     # Update model kwargs. The node/edge encoders map to the model width, so every conv is
     # hidden -> hidden (uniform width across all models) and residual skips are identity.
@@ -218,6 +276,35 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'node_encoder': models.Encoder(2, embedding_dim=embedding_dim, num_features=1),
             'num_pred_heads': 2
         })
+    elif dataset_query in NODE_DATASETS:
+        # Edge-less: no edge_dim / edge_encoder. `readout` is set here rather than left to the YAML
+        # because configargparse stringifies the nested `model_args` mapping, so a `readout: null`
+        # in a config arrives at the model as the STRING 'None' — which matches no branch of the
+        # readout chain and would therefore look correct while being an accident. Setting it here
+        # makes per-node output the resolver's decision, checked by the guard below.
+        model_kwargs.update({
+            'in_channels': embedding_dim,
+            'node_encoder': nn.Linear(dataset.num_features, embedding_dim),
+            'num_pred_heads': dataset.num_classes,
+            'readout': None
+        })
+
+    # The one place the level contract is enforced, for every model and dataset. The readout chain
+    # in each model has no `else`, so neither an unrecognized value nor a level mismatch raises on
+    # its own: a graph-level config that loses its readout silently starts predicting per node, and
+    # a node-level config that keeps one silently pools the whole graph into a single row. Both are
+    # caught here, before any model is built. The two mismatches get separate messages because they
+    # are opposite mistakes — one config says too little, the other too much.
+    if config_readout not in READOUT_CHOICES:
+        raise ValueError(f"Could not resolve readout '{config_readout}' among choices "
+                         f"{READOUT_CHOICES}")
+    if dataset_query in NODE_DATASETS and config_readout is not None:
+        raise ValueError(f"Node-level dataset '{dataset_query}' predicts one row per node, so its "
+                         f"config must not set a graph `readout`; got '{config_readout}'")
+    if dataset_query not in NODE_DATASETS and config_readout is None:
+        raise ValueError(f"Graph-level dataset '{dataset_query}' needs a graph `readout` to pool "
+                         f"nodes into one row per graph; none was set (choices "
+                         f"{READOUT_CHOICES[1:]})")
 
     # Load the model
     if model_query == 'LDNA':
@@ -269,11 +356,13 @@ def loss_resolver(query, **kwargs):
 
 def evaluator_resolver(query, **kwargs):
     choices = {
-        'OGBNodePropPredEvaluator': ogb.nodeproppred.Evaluator,
+        'OGBNodeEvaluator': OGBNodeEvaluator,
         'OGBGraphPropPredEvaluator': ogb.graphproppred.Evaluator,
         'ZINCEvaluator': ZINCEvaluator,
         'MNISTEvaluator': MNISTEvaluator,
         'AccuracyEvaluator': AccuracyEvaluator,
+        'ROCAUCEvaluator': ROCAUCEvaluator,
+        'MicroF1Evaluator': MicroF1Evaluator,
         'Code2Evaluator': Code2Evaluator,
     }
 
