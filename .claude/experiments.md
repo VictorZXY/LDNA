@@ -419,9 +419,10 @@ searched value would apply to LDNA and every baseline): `readout`
 (`add`/`max`/`mean`/`gru`/`attention`), `residual`, `batch_norm`, `act`. LDNA-specific:
 `num_pre_layers`, `num_post_layers`, `num_pred_layers`.
 
-`hyperparam_search.py` must be **extended to accept all datasets in this playbook**
-(currently only the three graph-level ones). Node-level and expressiveness search
-depends on the pipeline changes in § Implementation queue. Per-dataset overrides go here: TODO.
+`hyperparam_search.py` covers **all five graph-level datasets**. Expressiveness search is
+**not needed** (batch-3 hyperparameters are protocol constants — see § Datasets → batch-3
+notes). Node-level search still has to be added, and lands with the node-level pipeline
+(§ Implementation queue). Per-dataset overrides go here: TODO.
 
 ---
 
