@@ -183,3 +183,4 @@ playground.*
 
 # Paper preparation material (not project code)
 docs/
+.claude/worktrees/

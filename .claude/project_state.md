@@ -73,17 +73,14 @@
   already yields per-node output. Evaluators added: `OGBNodeEvaluator`, `ROCAUCEvaluator`,
   `MicroF1Evaluator`; `AccuracyEvaluator` gained a `.view(-1)` fixing an `[N]`-vs-`[N,1]`
   broadcast. Only `Cora` is wired so far (`configs/ldna_cora.yaml`), as an unreported smoke test.
-- `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run.
-  Model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders
-  (`models/encoder.py: Encoder` defines no such method), so before this every run after the first
-  warm-started from the previous run's trained encoder and runs were not independent. Measured on
-  ZINC subset (5 runs × 60 epochs): the warm-start **inflates** run-to-run std ≈3.8× (0.0102 vs
-  0.0027) — each run starts from a different drifted state rather than from one initialization
-  distribution — so the pre-fix results in § Results log carry a std that is too large and
-  significance judgements that are correspondingly conservative, never overstated. Those results
-  were **not** re-run. Fixed in the caller so LDNA and every baseline get identical treatment with
-  no model file touched; `scripts/train_fold.py` was already clean (it rebuilds per seed).
-  `data_utils/brec.py` has the same pattern and is **not** yet fixed — see § Open questions.
+- `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
+  model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
+  so runs are independent for LDNA and every baseline alike, applied in the caller with no
+  baseline model file touched. It reproduces each encoder's construction-time init distribution
+  (`Encoder`/`ASTNodeEncoder` define Xavier `reset_parameters`; OGB's `AtomEncoder`/`BondEncoder`
+  are re-initialized explicitly since the ogb package defines no reset method).
+  `scripts/train_fold.py` was already clean (it rebuilds per seed); `data_utils/brec.py` has the
+  same pattern and is deliberately left alone — see § Open questions.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.

@@ -114,10 +114,12 @@ the last one first if the budget shrinks). Sizes below are from the PyG/OGB meta
 > Three conclusions. (1) **The rank gap is healthy at every scale** — median \|δ\| is 0.21–0.31 on
 > Cora/Questions/arxiv, refuting the pre-implementation worry that δ collapses on large graphs;
 > δ is a difference of percentiles between two edge endpoints, so it does not shrink with N.
-> (2) **PPI is the predicted tie-collapse case, and it is severe**: only 17.7% of feature rows are
-> distinct (14.5–28.8% across the 20 train graphs), so 15.6% of edges carry δ = 0 exactly and
-> median \|δ\| is an order of magnitude below the others. This is the ZINC failure mode — expect
-> LDNA to be weakest here, and report it rather than hiding it. (3) **`deg^L` is a bad estimator
+> (2) **PPI's tie structure is not a red flag** (user ruling, 2026-07-29): the operative collapse
+> metric is **P(δ=0) on edges** — the fraction of edges whose gate input is exactly zero — not the
+> distinct-feature-row share. On P(δ=0), ZINC is the highest of all datasets (which is what
+> motivates the ZINC WL-refinement check), and PPI's 15.6% sits *below* MNIST/molpcba/molhiv,
+> graph-level datasets where LDNA already places top-2. PPI therefore runs through the normal
+> protocol with no WL refinement or other special handling. (3) **`deg^L` is a bad estimator
 > of coverage** and the measured depths supersede it: Questions covers at k=4, not "never" (its
 > ball grows far faster than mean degree predicts — the heavy-tail effect), so its range is [2, 6]
 > rather than the full [2, 8]. Ranges are the measured covering depth + 2.

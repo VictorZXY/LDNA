@@ -7,6 +7,7 @@ import torch
 import torch_geometric
 import yaml
 from configargparse import YAMLConfigFileParser
+from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from torch import nn
 from torch_geometric.nn.resolver import optimizer_resolver, lr_scheduler_resolver
 
@@ -36,6 +37,14 @@ def _reset_encoders(model):
     # to LDNA and every baseline without touching a model file. Modules are walked by name so the
     # encoders are found through a wrapper too (`Code2Head` holds them on `.backbone`).
     def reset(module):
+        # OGB's molecular encoders are third-party and define no reset method, so the walk below
+        # would fall through to their `nn.Embedding` children's N(0, 1) default -- not the Xavier
+        # their constructors applied. They are re-initialized here exactly as constructed instead.
+        if isinstance(module, (AtomEncoder, BondEncoder)):
+            for emb in module.modules():
+                if isinstance(emb, nn.Embedding):
+                    nn.init.xavier_uniform_(emb.weight.data)
+            return
         # A module that defines `reset_parameters` owns its whole subtree's initialization, so the
         # walk stops there. Descending past it would overwrite that choice with each child's own
         # default -- `Encoder`'s Xavier replaced by `nn.Embedding`'s N(0, 1), a 12x rescale of the
