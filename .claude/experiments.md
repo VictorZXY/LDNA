@@ -497,16 +497,36 @@ notes). Node-level search still has to be added, and lands with the node-level p
   constant LR is not per-model-neutral, but neither is a plateau scheduler, which fires on
   whichever model plateaus first and penalizes slow starters invisibly; genuine per-model
   adaptivity would require per-model LR tuning, which § Tuning methodology forbids.
-  - Evidence base: **~15 independent node-level codebases, none of which decays the LR** —
+  - Evidence base: **22 full-graph node-level implementations surveyed, 21 with no LR decay** —
     OGB's five node examples, Platonov, tunedGNN, Polynormer, SGFormer, NodeFormer, DIFFormer,
-    LINKX, GCNII, SGC, DeeperGCN, DGL's arxiv GAT (`grep -c 'scheduler|Cosine|Plateau'` is
-    literally 0 in Polynormer's and SGFormer's `main.py`). The one counterexample, **NAGphormer**
-    (PolynomialDecayLR + 400 warmup updates), is a *minibatch tokenized* transformer of the
-    Graphormer lineage and inherits NLP conventions, not full-graph GNN ones — so it does not
-    bear on this regime. **Warmup is a separate mechanism from decay** and does appear twice
-    (DGL's arxiv GAT warms up linearly over 50 epochs then holds; Platonov's LambdaLR is
-    warmup-capable with the feature off by default). If early-step instability ever shows up,
-    warmup is the field-sanctioned and citable fix; decay is not.
+    LINKX, GCNII, SGC, APPNP, DeeperGCN, Kipf's GCN, GAT, PyG's examples, DGL's arxiv GAT
+    (`grep -c 'scheduler|Cosine|Plateau'` is literally 0 in Polynormer's, SGFormer's,
+    NodeFormer's and DIFFormer's `main.py`). The lone exception, the benchmarking-gnns arxiv
+    port, carries `min_lr` and **breaks** the loop when the LR reaches it — a stopping criterion
+    rather than an anneal, i.e. it had to neutralize this same failure mode.
+  - **The rule is NOT "full-graph doesn't anneal, graph-level does" — that framing is false and
+    should not be written down.** OGB's *graph-level* examples (mol, code2, ppa) also have zero
+    schedulers, and SAN/benchmarking-gnns apply the same `ReduceLROnPlateau` to graph-level ZINC
+    and to node-level SBM_PATTERN. The split is codebase lineage (OGB's minimal reference code /
+    node specialists / the NLP-transformer line / benchmarking-gnns), and underneath it the real
+    mechanism is **the unit the schedule counts in**: a schedule counted in *epochs* becomes
+    meaningless when an epoch is one optimizer step, while one counted in *updates* is unaffected
+    at any batch size (Graphormer's 60,000 warmup updates is well defined; `ReduceLROnPlateau`'s
+    patience of 10 epochs is 10 steps at node level and 1300–6800 at graph level). Our bug was
+    exactly an epoch-counted schedule meeting a one-step epoch.
+  - Sharpest available test, and it is unanimous: **every graph transformer that runs full-graph
+    node-level uses a constant LR** (Polynormer, SGFormer, NodeFormer, DIFFormer, tunedGNN's GT
+    re-runs). The transformers that do anneal are precisely the ones not doing full-graph node
+    work — GraphGPS ships 89 configs and **zero** node-level ones; Graphormer's examples are
+    pcqm4m/zinc/hiv/oc20; NAGphormer is minibatch tokenized (batch 1000) and counts its decay in
+    updates.
+  - **Warmup is a separate mechanism from decay, and only warmup is attested here.** Two of the
+    22 use it, both *without* any decay: DGL's arxiv GAT scales `lr × epoch/50` for 50 epochs then
+    holds, and Platonov's LambdaLR is warmup-capable with the feature off by default. So
+    warmup-then-constant is a live convention in full-graph node training and warmup-then-decay is
+    not. If LDNA ever shows early-step instability, linear warmup over ~50 steps is the citable
+    fix (DGL's arxiv GAT); it cannot reintroduce the failure mode, since it ends early and never
+    drops the LR below base. Decay stays unsupported.
   - **Step budget: a cap, not a target.** No source justifies its budget or reports an
     accuracy-vs-steps curve for full-graph node classification, and the numbers do not scale
     with graph size (GCNII gives 2.7k-node Cora 1500 steps; OGB gives 169k-node arxiv 500).
@@ -542,7 +562,9 @@ notes). Node-level search still has to be added, and lands with the node-level p
     or 40 sampled epochs (GraphSAINT); PPI 100 epochs × 20 graphs ≈ 2000 steps (PyG).
   - **`PNA` has no upstream node-level recipe** — its repo ships graph-level configs only
     (ZINC, HIV, MNIST, CIFAR10). It is in our node suite, so it will be configured without an
-    upstream reference; record that in the fairness write-up rather than implying one exists.
+    upstream reference *and* against its own lineage's default (benchmarking-gnns, which would
+    imply `ReduceLROnPlateau`); record that in the fairness write-up rather than implying an
+    upstream reference exists.
   - Sanity anchors (what "training works" looks like): **Questions** test ROC-AUC **76–79**
     (Platonov Table 4: GCN 76.09, SAGE 76.44, GAT 77.43, best FSGNN 78.86); **ogbn-arxiv**
     full-graph test accuracy **71.5–73.6%** (OGB leaderboard GCN 71.74; tunedGNN re-tuned
