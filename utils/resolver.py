@@ -148,8 +148,14 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # still computed AFTER the permutation.
         # CONSTRAINT: `canonical` requires LDNA's rank_mode='position' (as on ogbg-code2 and
         # EXP/CEXP). The nauty order keeps equal feature rows contiguous and ascending, so a
-        # feature-mode rank on it reproduces the un-canonicalized rank EXACTLY — the treatment
-        # would silently do nothing rather than fail.
+        # feature-mode rank on it reproduces the un-canonicalized rank EXACTLY (measured: identical
+        # P(delta=0) and identical rank values) — the treatment would silently do nothing and the
+        # run would report a null result while having trained the untreated arm. Rejected here for
+        # the same reason the readout guard exists: the failure is invisible in the output.
+        if canonical and model_query == 'LDNA' and model_kwargs.get('rank_mode') != 'position':
+            raise ValueError("Argument `rank_mode` must be 'position' when `canonical` is set: the "
+                             "nauty order keeps equal feature rows contiguous, so a feature-tie "
+                             "rank on it silently reproduces the un-canonicalized rank")
         order_graphs = canonicalize_graphs if canonical else sort_graphs
         train_dataset = order_graphs(train_dataset, sort_y=False)
         val_dataset = order_graphs(val_dataset, sort_y=False)
