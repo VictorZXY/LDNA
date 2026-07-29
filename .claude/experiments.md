@@ -619,21 +619,24 @@ Under the shared-hyperparameter protocol (same `hidden_channels`/`num_layers` fo
 models) the **param counts still differ a lot** because each architecture has a different
 per-layer structure. From `# Params` in the ranking logs, ratios **relative to LDNA (=1.00×)**
 (GIN xor GINE per dataset → one row: `gin` on the edge-less datasets — MNIST, code2 — and `gine`
-on the edge datasets — ZINC, molpcba, molhiv. `avg` is the mean ratio across the five datasets.)
+on the edge datasets — ZINC, molpcba, molhiv. `avg` is the mean ratio across the **four non-code2
+datasets** — code2 is excluded because its shared sequence head compresses every ratio toward 1×
+and would distort the mean; see the note below.)
 
-| model | ZINC (h256/l7) | molpcba (h1024/l7) | MNIST (h256/l6) | molhiv (h256/l6) | code2 (h256/l5) | **avg** |
+| model | ZINC (h256/l7) | molpcba (h1024/l7) | MNIST (h256/l6) | molhiv (h256/l6) | code2 (h256/l5) | **avg⁻ᶜ²** |
 |---|---|---|---|---|---|---|
-| **pna** | **4.15×** | **4.25×** | **4.76×** | **4.05×** | **1.42×** | **3.73×** |
-| **dgn** | **3.02×** | **3.09×** | **3.59×** | **2.95×** | **1.19×** | **2.77×** |
-| gatv2 | 0.74× | 0.76× | 0.67× | 0.75× | 0.96× | 0.78× |
-| sage | 0.51× | 0.53× | 0.67× | 0.53× | 0.96× | 0.64× |
-| gat | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.58× |
-| gin / gine | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.58× |
-| vpa (GNN-VPA) | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.58× |
-| gcn / deepergcn | 0.29× | 0.29× | 0.38× | 0.31× | 0.93× | 0.44× |
-| egc | 0.26× | 0.20× | 0.34× | 0.28× | 0.93× | 0.40× |
+| **pna** | **4.15×** | **4.25×** | **4.76×** | **4.05×** | **1.42×** | **4.30×** |
+| **dgn** | **3.02×** | **3.09×** | **3.59×** | **2.95×** | **1.19×** | **3.16×** |
+| gatv2 | 0.74× | 0.76× | 0.67× | 0.75× | 0.96× | 0.73× |
+| sage | 0.51× | 0.53× | 0.67× | 0.53× | 0.96× | 0.56× |
+| gat | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.49× |
+| gin / gine | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.49× |
+| vpa (GNN-VPA) | 0.52× | 0.53× | 0.38× | 0.53× | 0.93× | 0.49× |
+| gcn / deepergcn | 0.29× | 0.29× | 0.38× | 0.31× | 0.93× | 0.32× |
+| egc | 0.26× | 0.20× | 0.34× | 0.28× | 0.93× | 0.27× |
 
-(LDNA absolute, rank-gated: ZINC 2.02M, MNIST 1.35M, molhiv 1.79M, code2 10.12M, molpcba 31.56M.)
+(LDNA absolute, rank-gated: ZINC 2.02M, MNIST 1.35M, molhiv 1.79M, code2 10.12M, molpcba 31.56M.
+`avg⁻ᶜ²` = mean over ZINC/molpcba/MNIST/molhiv only.)
 
 - **Nearly invariant to `hidden_channels`:** the four molecular/image datasets (ZINC h256,
   molpcba h1024, MNIST/molhiv h256; `l5`–`l7`) give near-identical ratios per model — param count
@@ -641,11 +644,12 @@ on the edge datasets — ZINC, molpcba, molhiv. `avg` is the mean ratio across t
   from the encoder/head terms (largest for the heavy models and molpcba's 128-task head).
   **`ogbg-code2` is the outlier**: every ratio compresses toward 1× because the shared
   sequence head (5×5002-vocab decode) dominates each model's param count and swamps the
-  conv-stack differences, so it pulls every `avg` toward the middle.
+  conv-stack differences — which is exactly why code2 is left out of the `avg` column (it would
+  otherwise flatten every model toward 1× and hide the real capacity gaps).
 - **Fairness caveat:** the shared protocol equalizes hidden/layers, **not** param count. The two
-  models that beat LDNA on its weaker datasets are also the two heaviest — **PNA at 3.73× and DGN
-  at 2.77× LDNA's params on average** (up to 4.8× / 3.6× on the non-code2 datasets); every other
-  baseline is ≤0.78×. So PNA's #1 on ZINC/MNIST and DGN's #1 on ZINC/code2 come with a large
+  models that beat LDNA on its weaker datasets are also the two heaviest — **PNA at 4.30× and DGN
+  at 3.16× LDNA's params on average** (excl. code2; up to 4.8× / 3.6× per dataset); every other
+  baseline is ≤0.73×. So PNA's #1 on ZINC/MNIST and DGN's #1 on ZINC/code2 come with a large
   capacity advantage (and, for DGN, a hand-supplied directional field), while LDNA reaches top-2
   at ≈1/4 of PNA's and ≈1/3 of DGN's params — an efficiency point in LDNA's favour. A
   param-normalised comparison (tune each model's width so params ≈ LDNA's) is a possible
