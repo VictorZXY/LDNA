@@ -7,6 +7,7 @@ import torch
 import torch_geometric.transforms as T
 from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
+from ogb.nodeproppred import PygNodePropPredDataset
 from torch import nn
 from torch_geometric.datasets import HeterophilousGraphDataset, MNISTSuperpixels, Planetoid, ZINC
 from torch_geometric.loader import DataLoader
@@ -22,7 +23,7 @@ from utils.evaluator import (AccuracyEvaluator, Code2Evaluator, MicroF1Evaluator
 # Datasets predicted per node rather than per graph. They take a different route through the
 # resolver — no canonical sort, no graph readout, one graph per "batch" — and the readout guard
 # below keys off this tuple to check that a config has not crossed the two levels.
-NODE_DATASETS = ('Cora', 'Questions')
+NODE_DATASETS = ('Cora', 'Questions', 'ogbn-arxiv')
 
 # Every model's readout chain is an `if`/`elif` with no `else`, so an unrecognized value does not
 # raise: it silently skips pooling and the model returns one row per node. That is exactly the
@@ -46,6 +47,30 @@ class FullGraphLoader:
 
     def __len__(self):
         return 1
+
+
+def _idx_to_masks(data, split_idx):
+    # OGB node datasets ship their splits as index tensors, while everything downstream of here
+    # reads boolean [N] node masks: FullGraphLoader names one and train.py's _split_mask indexes
+    # with it, and a sampled loader would rely on PyG's size-based collate, which follows a
+    # node-sized mask into a subgraph but would carry a list of global indices over unchanged.
+    # Converting once at load time keeps both paths as they are for every OGB node dataset.
+    #
+    # The partition is verified rather than trusted: overlapping or incomplete splits give a run
+    # that looks healthy while scoring evaluation nodes it trained on, the same failure the
+    # mask-before-NaN-filter ordering in train.py exists to prevent.
+    for split, name in (('train', 'train_mask'), ('valid', 'val_mask'), ('test', 'test_mask')):
+        mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        mask[split_idx[split]] = True
+        data[name] = mask
+
+    covered = data.train_mask.long() + data.val_mask.long() + data.test_mask.long()
+    if not bool((covered == 1).all()):
+        raise ValueError(f"Splits must partition the {data.num_nodes} nodes; got "
+                         f"{int((covered > 1).sum())} node(s) in more than one split and "
+                         f"{int((covered == 0).sum())} in none")
+
+    return data
 
 
 def _planar_cv_folds(dataset, batch_size, num_folds=10):
@@ -200,7 +225,23 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # so the model sees the same rank gaps whether or not the nodes are physically relabelled
         # (see data_utils.node_rank), and skipping the permutation keeps the masks and `y` aligned
         # with the nodes without an extra realignment pass.
-        if dataset_query == 'Questions':
+        if dataset_query == 'ogbn-arxiv':
+            dataset = PygNodePropPredDataset(name=dataset_query, **dataset_kwargs)
+            # arxiv ships DIRECTED citation edges, while every model in this suite aggregates over
+            # an undirected neighbourhood — left directed, a paper would see the papers it cites or
+            # the papers citing it but never both, and every node with no outgoing citation would
+            # aggregate over nothing. Symmetrizing is therefore a preprocessing choice shared by ALL
+            # models, like the canonical sort at graph level, not a per-model knob. It is applied to
+            # the in-memory graph rather than as a pre_transform so the OGB cache on disk stays the
+            # unmodified upstream copy every config reads.
+            data = T.ToUndirected()(dataset[0])
+            data = _idx_to_masks(data, dataset.get_idx_split())
+            # `y` arrives as [N, 1] int64. The CrossEntropyLoss path in train.py flattens its
+            # labelled-row filter to `(y == y).view(-1)` and passes `y[is_labelled].long()` as class
+            # indices, so the target has to be [N]: a [N, 1] one would be filtered along the wrong
+            # axis and reach the loss with a trailing dimension it does not accept.
+            data.y = data.y.view(-1)
+        elif dataset_query == 'Questions':
             dataset = HeterophilousGraphDataset(name=dataset_query, **dataset_kwargs)
             data = dataset[0]
             # Binary task scored on a single logit (BCEWithLogitsLoss + ROC-AUC), so the integer

@@ -79,7 +79,16 @@
   ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
   sum-of-messages aggregator), paired with the hand-picked, untuned D2 gate-ablation configs
   `ldna_questions_d2.yaml` / `ldna_questions_d2_ungated.yaml` (identical except the gate; not
-  run yet).
+  run yet). `ogbn-arxiv` is wired full-graph (`configs/ldna_arxiv.yaml`, hand-picked and untuned,
+  pending the node-level search): OGB ships split INDEX tensors, so `utils/resolver.py:
+  _idx_to_masks` turns them into the boolean `[N]` masks the rest of the node path reads and
+  rejects a non-partitioning split on the spot; `T.ToUndirected()` symmetrizes the directed
+  citation edges as a preprocessing choice shared by every model (169,343 nodes / 2,315,598
+  undirected edge entries); `y` is flattened to `[N]` for the CrossEntropy path. Measured peak
+  GPU memory for full-graph LDNA (3 training steps, A6000): **18.33 GiB at h=128/L=3** and
+  **35.58 GiB at h=256/L=3** — ≈6.1 GiB per layer at h=128, scaling linearly in both, which is
+  what bounds the `(hidden_channels, num_layers)` box of the node-level search on a 49 GB card.
+  The sampled control is still to come.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run.
   Model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders
   (`models/encoder.py: Encoder` defines no such method), so before this every run after the first
@@ -151,9 +160,10 @@
 
 ## Partial or missing components
 - `README.md` is a title stub; it does not explain the project or its setup/usage.
-- Node-level support covers only the full-graph transductive case on `Cora` and `Questions`.
-  Sampling (GraphSAINT), layer-wise exact inference, the remaining datasets (ogbn-arxiv, PPI,
-  ogbn-products, Reddit), and the tune → broadcast → rank protocol are not implemented yet.
+- Node-level support covers only the full-graph transductive case on `Cora`, `Questions` and
+  `ogbn-arxiv`. Sampling (GraphSAINT, including arxiv's sampled control), layer-wise exact
+  inference, the remaining datasets (PPI, ogbn-products, Reddit), and the tune → broadcast → rank
+  protocol are not implemented yet.
 
 ---
 
