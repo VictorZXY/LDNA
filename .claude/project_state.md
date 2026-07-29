@@ -35,8 +35,10 @@
   `LDNA` computes the per-node rank under a `rank_mode` knob: `feature` (tie-aware dense rank
   over the lexsorted feature order; the default) or `position` (intra-graph position for
   datasets whose node order is canonical by construction — code2's AST DFS order; used by
-  `configs/ldna_code2_rankgate.yaml`). Reruns of the rank-gated LDNA with the previously
-  tuned shared params: ZINC done, molhiv/molpcba/MNIST in flight, code2 pending a GPU slot.
+  `configs/ldna_code2_rankgate.yaml`). This rank-gated design is the current official LDNA —
+  the outcome of the escalation, superseding the earlier plain summed-linear-map aggregator;
+  it has been rerun with the previously tuned shared params on all five graph-level datasets
+  (results in `.claude/experiments.md` § Results log).
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
   `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
   `VariancePreservingAggregation`, `sum/√N`), and `DGN` (`models/dgn.py` — a PNA-shaped layer
@@ -114,11 +116,11 @@
 
 ---
 
-## Next step: graph-level experiment protocol
-- The remaining work is to run the graph-level protocol on each dataset: tune LDNA →
-  broadcast the tuned shared config to all baselines → rank → log. It is tracked in
-  `.claude/experiments.md` (§ Experiment queue, § Results log), the source of truth for
-  objectives, search spaces, and results.
+## Graph-level experiment protocol (complete)
+- The graph-level protocol (tune LDNA → broadcast the tuned shared config to all baselines →
+  rank → log) has been run on all five datasets, plus the `DGN` baseline. Objectives, the
+  per-dataset tuned configs, and final rankings live in `.claude/experiments.md`
+  (§ Experiment queue, § Results log), the source of truth.
 - Helper scripts: `broadcast.py` writes the tuned shared knobs into every baseline config
   and creates the `GNN-VPA` config (`python broadcast.py --dataset <D> --hidden_channels ..
   --num_layers .. --dropout .. --lr .. --weight_decay .. --gpus 0,1,2,3`); `run_jobs.sh`

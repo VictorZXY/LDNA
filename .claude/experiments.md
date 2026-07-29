@@ -197,7 +197,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > other baseline can see it. One direction is the right count for a tree — an AST has a single
 > canonical axis, where CIFAR10's two came from an image having two coordinates.
 >
-> Three consequences of the substitution, recorded as decisions rather than left implicit.
+> Two consequences of the substitution, recorded as decisions rather than left implicit.
 > (1) **`dir-dx` keeps its `.abs()`**, although the reason for that absolute value — folding away
 > an eigenvector's arbitrary sign — does not apply to depth, whose sign is canonical (it grows
 > away from the root). Measured cost: 50.1% of the pre-`abs` entries are negative and
@@ -208,13 +208,7 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > a second deviation stacked on the field substitution would be harder to defend than a slightly
 > weaker baseline. (2) **DGN runs 2 aggregators on code2 and 3 elsewhere**, so it carries
 > 12.05M parameters against PNA's 14.34M. That is *less* of a gap than the other datasets, where
-> dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below. (3) **`hyperparam_search.py` gets no
-> `_eig_kwargs` guard at any of its four model call sites** — not the two in its code2 fork and
-> not the two in its standard path. This is a property of the whole script, not a code2
-> asymmetry: it builds the hardcoded string `'LDNA'` at both resolver calls and has no `--model`
-> flag, so DGN is unreachable there and the resolver would not attach `eig_vec` for a non-DGN
-> query anyway. If the search is ever parameterized by model, it fails loudly at the first
-> forward (`ValueError: Argument 'eig_vec' must be given ...`), not silently.
+> dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below.
 
 > **DGN's advantage is dataset-selective.** DGN places 1st only on ZINC (0.0507 test MAE)
 > and code2 (0.1876 test F1) — the datasets whose dominant structure matches its directional
@@ -424,8 +418,7 @@ depends on the pipeline changes in § Implementation queue. Per-dataset override
     VRAM on each card within its 49GB — size batch/hidden so each process's peak fits the
     free headroom, release cache between search trials (`torch.cuda.empty_cache()`), make
     searches OOM-tolerant (`study.optimize(catch=(RuntimeError,))`), and watch per-card
-    free memory (a safety monitor alerts if any card's free VRAM drops into the danger
-    zone). If a card gets tight, back our jobs off rather than risk a collision.
+    free memory. If a card gets tight, back our jobs off rather than risk a collision.
   - **`--mem_fraction` policy (user, 2026-07-08): do NOT cap a search that owns its card.**
     `hyperparam_search.py --mem_fraction` calls `set_per_process_memory_fraction`, a **hard**
     per-process cap: a large sampled config (hidden 1024 × layers 8) that exceeds it OOMs, is
@@ -516,28 +509,10 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 Runs to do once the code is in place. Keep status current; move finished items to
 the results log.
 
-**Graph-level protocol.** For **each** dataset in § Datasets → Graph-level prediction,
-run these steps independently — **do not reuse any past hyperparameters** (they are
-invalid after the architecture change):
-
-1. **Tune LDNA from scratch** on the dataset with `hyperparam_search.py`.
-2. **Broadcast** the tuned shared config verbatim to all baselines via `broadcast.py`
-   (`python broadcast.py --dataset <D> --hidden_channels .. --num_layers .. --dropout ..
-   --lr .. --weight_decay .. --gpus 0,1,2,3`). It overrides only the shared knobs in each
-   model's config (model-internal settings preserved), creates the `GNN-VPA` config, and
-   round-robins `cuda`. Baseline set per § Tuning methodology + the GIN-xor-GINE rule:
-   GCN, **{GINE if edge else GIN}**, GraphSAGE, GAT, GATv2, PNA, EGC, DeeperGCN
-   (softmax+powermean), GNN-VPA — plus LDNA.
-3. **Run** LDNA + all baselines on the dataset with `train.py` (multi-run).
-4. **Rank** LDNA vs. baselines by the § Objective margin and append to § Results log.
-
-- [ ] `ogbg-molhiv`
-- [ ] `ogbg-molpcba` — **search capped** at best-value plateau or ~25-30 trials (whichever
-      first; user 2026-07-07), then broadcast best-so-far. **Ranking stays full** (11 models
-      × 3 runs × 150 epochs — no reduction). 350k graphs → the compute outlier.
-- [ ] `ZINC`
-- [ ] `MNISTSuperpixels`
-- [ ] `ogbg-code2` (edge-less pipeline landed; run after a GPU frees)
+**Graph-level protocol** (per § Tuning methodology: tune LDNA → `broadcast.py` the tuned
+shared config to all baselines → run → rank → append to § Results log): **complete on all
+five datasets** — `ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2` —
+plus the `DGN` baseline added afterward. Final rankings in § Results log.
 
 **Batch 3 — synthetic expressiveness** (protocol in § Datasets → batch-3 notes; no search,
 no broadcast — the three configs per dataset are the protocol). **Complete 2026-07-28**;
@@ -637,9 +612,9 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-07-28 | BREC | LDNA + GIN + DGN (batch 3) | RPC protocol, shared 64×8, BN on, S+εI, 10 seeds × 400 pairs | pairs distinguished: LDNA **122.8±9.2 / 400** | **#2** of the 3 run; ≫ every 1-WL baseline (provably and empirically 0) | Original-run numbers, kept as companions — the official LDNA/DGN figures were set later by the gate-init and canonicalization-ablation rows below. GIN 0.0±0.0 (exact, all seeds); DGN **271.4±1.0** (#1, ≈ the published 3-WL/PPGN level ~270). LDNA by category: Basic 43.3/60, Extension 61.8/100, 4-Vertex 10.7/20, Regular 6.0/100, DR 0.9/20, CFI 0.1/100 — the rank gate cracks the non-regular families, not CFI. Reliability failures 0 for every model/seed. **Recorded caveat:** DGN's Regular/DR sweep (99/100, 20/20) is partly a by-product of the shared canonicalization — a deterministic node order fixes the otherwise arbitrary degenerate eigenbasis, turning it into an isomorphism-invariant feature; this is shared preprocessing (identical for all models), not DGN-specific tuning, but it materially helps DGN beyond its own paper's setting and is disclosed as such (quantified by the canonicalization-ablation row below: unaided DGN 144.4). |
 | 2026-07-28 | BREC (LDNA gate-init) | LDNA | `ldna_brec_gateinit.yaml`: `gate_init_std: 0.1`, chosen by the pre-committed per-category probe (σ ∈ {0.001, 0.01, 0.1} + σ=0 arm, 20 pairs × 6 families × 3 seeds → 69.0 / 98.0 / 106.0 vs 46.7 of 120); everything else the committed BREC setting | pairs distinguished: LDNA **312.0±4.0 / 400** | **#1** | **Official LDNA BREC number** (promoted by this follow-up). Per category: Basic 59.7/60, Regular 100.0/100, Extension 99.5/100, CFI 12.9±3.4/100, 4-Vertex 20.0/20, DR 19.9/20; reliability failures 0 on all 10 seeds. Reported alongside zero-init LDNA 122.8±9.2 (identical protocol otherwise). Above DGN 271.4±1.0 (shared-canonicalization setting) and DGN 144.4±0.7 (its own construction). Sweeps the 3-WL-hard families (Regular / 4-Vertex / DR); CFI is the residual. Logs `ranking/brec/ldna_brec_gateinit.{txt,_results.json}`. |
 | 2026-07-28 | BREC (canonicalization ablation) | DGN (+ GIN control) | BREC rebuilt without the shared canonicalization — the benchmark's own raw-graph6 construction (`BRECDataset(canonical=False)`, `data/brec_noncanon`); everything else at the committed 64×8/BN-on/S+εI/10-seed setting | pairs distinguished: DGN **144.4±0.7 / 400** (canonical: 271.4±1.0) | n/a (ablation; LDNA not involved) | **Official DGN BREC number** (the benchmark's own construction; promoted by this ablation). The −127 drop is confined to the degenerate families — Regular 99→43, 4-Vertex 20→0, DR 20→0, CFI 29.5→3.0 — while Basic is bit-identical (32.0±0.0) and Extension moves only 70.9→66.4: the signature of the arbitrary degenerate eigenbasis, not of the changed RPC regime. GIN control: exactly 0/400 with 0 reliability failures on all 10 seeds on **both** builds — the regime change alone produces no signal. DGN's reliability failures also 0 throughout (field inconsistency deflates T² rather than inflating it). Reading: DGN's directional aggregation is genuinely >1-WL unaided (144.4, still above LDNA's 122.8); the other ~127 pairs of its committed 271.4 come from the shared canonicalization turning the degenerate eigenbasis into an isomorphism-invariant feature. LDNA's 122.8 involves no spectral pipeline and is untouched by this ablation. |
-| 2026-07-29 | all graph-level (DGN added as 11th baseline) | DGN | shared tuned config per dataset (each dataset's LDNA row); runs as before; molpcba 3 runs (2×seed42 on cuda:0 + 1×seed43 on cuda:3, split to parallelize) | DGN test: ZINC 0.0507±0.0001 (#1), code2 0.1876±0.0004 (#1), MNIST 0.9409±0.0012 (#3), molpcba 0.2727±0.0050 (#3), molhiv 0.7836±0.0110 (#6) | LDNA top-2 on 4/5; **3rd on ZINC** | DGN is dataset-selective — 1st only where a clean directional field meets an anisotropic task (Fiedler-vector molecular backbone on ZINC; exact AST root-to-leaf depth on code2), and mid-pack where the field fragments (molhiv, 7.5% disconnected), collapses a 2-D layout onto one axis (MNIST), or is one axis shared across 128 tasks (molpcba). Effect on LDNA: **code2 #1→#2** (0.1850, still ahead of every other baseline incl PNA 0.1844); **ZINC #2→#3** — ZINC now reads DGN 0.0507 / PNA 0.0807 / LDNA 0.0856. ZINC is simultaneously DGN's designed showcase and LDNA's weakest rank signal (a single atom-type node feature collapses the tie-aware rank to a coarse atom-type-rank gap), and the two methods ahead are both heavyweight molecular-regression specialists — DGN's hand-supplied precomputed spectral field, PNA's multi-aggregator + degree scalers. LDNA remains the only method first-or-second across the whole benchmark with no per-dataset directional prior or extra engineering. Analysis: `docs/dgn_specialization.md`. |
+| 2026-07-29 | all graph-level (DGN added as 11th baseline) | DGN | shared tuned config per dataset (each dataset's LDNA row); runs as before; molpcba 3 runs (seed 42 ×2 + seed 43 ×1) | DGN test: ZINC 0.0507±0.0001 (#1), code2 0.1876±0.0004 (#1), MNIST 0.9409±0.0012 (#3), molpcba 0.2727±0.0050 (#3), molhiv 0.7836±0.0110 (#6) | LDNA top-2 on 4/5; **3rd on ZINC** | DGN is dataset-selective — 1st only where a clean directional field meets an anisotropic task (Fiedler-vector molecular backbone on ZINC; exact AST root-to-leaf depth on code2), and mid-pack where the field fragments (molhiv, 7.5% disconnected), collapses a 2-D layout onto one axis (MNIST), or is one axis shared across 128 tasks (molpcba). Effect on LDNA: **code2 #1→#2** (0.1850, still ahead of every other baseline incl PNA 0.1844); **ZINC #2→#3** — ZINC now reads DGN 0.0507 / PNA 0.0807 / LDNA 0.0856. ZINC is simultaneously DGN's designed showcase and LDNA's weakest rank signal (a single atom-type node feature collapses the tie-aware rank to a coarse atom-type-rank gap), and the two methods ahead are both heavyweight molecular-regression specialists — DGN's hand-supplied precomputed spectral field, PNA's multi-aggregator + degree scalers. LDNA remains the only method first-or-second across the whole benchmark with no per-dataset directional prior or extra engineering. Analysis: `docs/dgn_specialization.md`. |
 
-### Parameter-count analysis (recorded 2026-07-13, no action taken yet)
+### Parameter-count analysis (recorded 2026-07-13)
 
 Under the shared-hyperparameter protocol (same `hidden_channels`/`num_layers` for all
 models) the **param counts still differ a lot** because each architecture has a different
