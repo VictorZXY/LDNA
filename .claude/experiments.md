@@ -575,10 +575,13 @@ notes). Node-level search still has to be added, and lands with the node-level p
   applied to **completed** runs only; live runs still write flat to `out/logs/` and are archived
   when they finish. Ranking analysis reads pickles from `out/logs/ranking/*/` (with a flat
   `out/logs/` fallback for a just-finished, not-yet-archived config).
-  **Exploratory runs are filed separately, under `out/logs/exploratory/<topic>/`**, never mixed
-  into `ranking/<dataset>/`. Anything in `ranking/` is part of a reported model-vs-model
-  comparison under the shared config; a probe, an ablation arm or an abandoned variant is not,
-  and mixing the two makes the ranking folder unreadable as the thing it is.
+  **Exploratory runs are filed separately, under `out/logs/explore/<topic>/`**, never mixed into
+  `ranking/<dataset>/`. Anything in `ranking/` is part of a reported model-vs-model comparison
+  under the shared config; a probe, an ablation arm or an abandoned variant is not, and mixing the
+  two makes the ranking folder unreadable as the thing it is. `search/` stays its own folder
+  rather than moving under `explore/`: a search is a protocol step whose output — the tuned
+  config — is committed and cited by every ranking row, so it is a permanent record, while
+  `explore/` holds work that may be discarded outright.
 
 ---
 
