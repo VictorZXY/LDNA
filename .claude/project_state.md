@@ -86,7 +86,7 @@
   is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via
   `rank_mode: position`; the model set is LDNA + GIN + DGN and there is no hyperparameter search
   (protocol constants). EXP/CEXP run through the standard loop (10-fold CV); BREC uses a
-  dedicated entry point (`brec_eval.py`, `data_utils/brec.py`). Full results, the DGN BREC
+  dedicated entry point (`scripts/pairwise_eval.py`, `data_utils/brec.py`). Full results, the DGN BREC
   canonicalization ablation, and all protocol decisions are in `.claude/experiments.md`
   (§ Results log, § Datasets → batch-3 notes, § Experiment queue).
 

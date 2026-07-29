@@ -1,3 +1,13 @@
+# Pairwise graph-distinguishing evaluation entry point (the RPC protocol).
+#
+# The pairwise protocol trains and tests per graph pair, so it cannot run through train.py's
+# epoch x train/val/test loop. This driver owns only the scaffolding (config/CLI, device,
+# logging, JSON results); the protocol itself — dataset, model wrapper, per-pair RPC
+# evaluation, summary — lives in `data_utils/brec.py`. BREC is currently the only pairwise
+# dataset wired up.
+#
+# Usage (from the repo root):
+#   python -m scripts.pairwise_eval --config configs/ldna_brec.yaml
 import json
 import os
 
@@ -6,83 +16,10 @@ import torch
 import torch_geometric
 import yaml
 from configargparse import YAMLConfigFileParser
-from torch import nn
 
-import models
 from data_utils import add_eig_vecs, degree_histogram
-from data_utils.brec import BRECDataset, OUTPUT_DIM, SEEDS, evaluate
+from data_utils.brec import BRECDataset, SEEDS, build_model, evaluate, print_summary
 from utils import tee_to_file
-
-
-class BRECModel(nn.Module):
-    """Wrap a repo backbone into the BREC test interface.
-
-    A backbone built with `num_pred_heads=None` returns the pooled graph embedding, which a linear
-    head maps to the protocol's `OUTPUT_DIM`. `forward(data)` matches the BREC calling convention
-    `model(data)`; `eig_vec` is forwarded only when the batch carries it (DGN), mirroring
-    `train.py`'s presence-based `_eig_kwargs`. `reset_parameters()` re-initializes both parts, which
-    the per-pair protocol calls before each comparison.
-    """
-
-    def __init__(self, backbone, out_channels, output_dim=OUTPUT_DIM):
-        super(BRECModel, self).__init__()
-        self.backbone = backbone
-        self.head = nn.Linear(out_channels, output_dim)
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.backbone.reset_parameters()
-        self.head.reset_parameters()
-
-    def forward(self, data):
-        edge_attr = getattr(data, 'edge_attr', None)
-        eig_kwargs = {'eig_vec': data.eig_vec} if hasattr(data, 'eig_vec') else {}
-        x = self.backbone(data.x, data.edge_index, edge_attr, data.batch, **eig_kwargs)
-        return self.head(x)
-
-
-def build_model(model_query, model_args, deg=None):
-    # Backbones are built directly (not through utils/resolver, whose dataset-coupled build path is
-    # for the graph-level tasks). BREC graphs are featureless, so the node encoder is nn.Linear(1,
-    # emb) and there is no edge encoder; num_pred_heads=None makes the backbone return the pooled
-    # embedding that BRECModel's head turns into the OUTPUT_DIM comparison vector.
-    model_args = dict(model_args)
-    embedding_dim = model_args['hidden_channels']
-    out_channels = model_args['out_channels']
-    model_args.update({
-        'in_channels': embedding_dim,
-        'node_encoder': nn.Linear(1, embedding_dim),
-        'num_pred_heads': None,
-    })
-
-    if model_query == 'LDNA':
-        backbone = models.LDNA(**model_args)
-    elif model_query == 'GIN':
-        backbone = models.GIN(**model_args)
-    elif model_query == 'DGN':
-        backbone = models.DGN(deg=deg, **model_args)
-    else:
-        raise ValueError(f"Could not resolve model '{model_query}' among choices ['LDNA', 'GIN', 'DGN']")
-
-    return BRECModel(backbone, out_channels)
-
-
-def _print_summary(results):
-    # Mean distinguished counts across the reruns, per category and overall.
-    from statistics import mean, pstdev
-    categories = list(results[0]['per_category'])
-    print("=== Summary across seeds ===")
-    for cat in categories:
-        vals = [r['per_category'][cat]['correct'] for r in results]
-        total = results[0]['per_category'][cat]['total']
-        print(f"{cat}: {mean(vals):.1f} +/- {pstdev(vals):.1f} / {total}")
-    correct = [r['correct'] for r in results]
-    reliable = [r['reliable_correct'] for r in results]
-    fail = [r['fail_reliability'] for r in results]
-    total = results[0]['total']
-    print(f"Correct: {mean(correct):.1f} +/- {pstdev(correct):.1f} / {total}")
-    print(f"Reliable-correct: {mean(reliable):.1f} +/- {pstdev(reliable):.1f} / {total}")
-    print(f"Fail in reliability: {mean(fail):.1f} +/- {pstdev(fail):.1f} / {total}")
 
 
 def main(args):
@@ -97,6 +34,11 @@ def main(args):
         # Cap this process's share of the (shared) GPU, mirroring train.py's § GPU policy guard.
         if device.type == 'cuda':
             torch.cuda.set_per_process_memory_fraction(args.mem_fraction, device.index)
+
+        # The argument exists so the train.py-style configs parse unchanged; only BREC implements
+        # the pairwise protocol today.
+        if args.dataset != 'BREC':
+            raise ValueError(f"Could not resolve dataset '{args.dataset}' among choices ['BREC']")
 
         model_args = args.model_args or {}
         # batch_size is protocol-fixed (BATCH_SIZE = 16 in data_utils/brec.py), so it is not a data knob.
@@ -131,7 +73,7 @@ def main(args):
             results.append(evaluate(model, dataset, device, seed=seed,
                                     s_epsilon=args.s_epsilon, pair_limit=args.pair_limit))
 
-        _print_summary(results)
+        print_summary(results)
         print(f"Finished BREC evaluation of {args.model}")
 
         # The BREC output (per-seed per-category counts + reliability failures) does not fit the
@@ -168,8 +110,8 @@ if __name__ == '__main__':
     parser.add_argument('--mem_fraction', default=0.30, type=float)
     parser.add_argument('--seed', default=42, type=int)
 
-    # BREC-specific: the RPC-protocol rerun seeds, the S_epsilon covariance guard, and a
-    # per-category pair cap for smoke/probing (0 = all SAMPLE_NUM pairs).
+    # Protocol-specific: the RPC rerun seeds, the S_epsilon covariance guard, and a per-category
+    # pair cap for smoke/probing (0 = all SAMPLE_NUM pairs).
     parser.add_argument('--seeds', default=None, type=int, nargs='+')
     parser.add_argument('--s_epsilon', default=True, type=yaml.safe_load)
     parser.add_argument('--pair_limit', default=0, type=int)

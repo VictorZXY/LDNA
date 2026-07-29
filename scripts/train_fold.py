@@ -1,18 +1,16 @@
-# Retrain a single EXP/CEXP CV fold once per seed, for the per-fold best-of-N protocol.
+# Train a single CV fold once per seed and keep the val-selected best-of-N.
 #
-# The committed EXP number is per-fold best-of-3 (seeds 42/43/44, val-selected, applied
-# symmetrically); extending a stuck fold to best-of-5 does not need the other nine folds rerun,
-# because the contiguous 10-fold split is deterministic in the fold index and best-of-N is
-# monotone. This driver keeps the extra candidates self-consistent: each seed re-seeds and
-# rebuilds the full construction (dataset order, encoder/model init, loader shuffling), then
-# trains ONLY the requested fold as a single run through the unmodified train.train loop.
+# Works for any dataset whose resolver builds cross-validation loaders (currently EXP/CEXP: the
+# fold list rides on the returned train_loader as `cv_folds`). Each seed re-seeds and rebuilds
+# the full construction (dataset order, encoder/model init, loader shuffling), then trains ONLY
+# the requested fold as a single run through the unmodified train.train loop. The seeds form a
+# self-contained candidate family — NOT a continuation of a full sweep's RNG stream — so the
+# reported fold number REPLACES a sweep's fold number rather than extending its candidate set
+# (which would make this fold best-of-(N+M) while every other fold stays best-of-N). The
+# per-fold best-of-N protocol behind the committed EXP numbers is in `.claude/experiments.md`.
 #
-# The candidates here are NOT the committed sweep's draws for this fold — there, a fold's
-# reset_parameters()/shuffling continued an RNG stream already advanced by the earlier folds'
-# runs. The driver's seeds form a new, self-contained family, and the reported fold number is
-# the best-of-N within this family alone: it REPLACES the committed fold's number rather than
-# extending its candidate set (which would make this fold best-of-(3+N) while every other fold
-# and every baseline stays best-of-3 — the asymmetry the objective forbids).
+# Usage (from the repo root):
+#   python -m scripts.train_fold --config configs/gin_exp.yaml --fold 10 --seeds 45 46
 import json
 import os
 
@@ -54,6 +52,7 @@ def main(args):
 
         per_seed = []
         early_stopped = False
+        mode = None
         for i, seed in enumerate(args.seeds):
             print(f"=== Fold {args.fold}, seed {seed} ===")
             # Re-seed and rebuild everything per seed. The resolver mutates the dicts it is given
@@ -63,37 +62,44 @@ def main(args):
             model, train_loader, _, _ = model_and_data_resolver(
                 args.model, args.dataset,
                 model_args=dict(args.model_args or {}), data_args=dict(args.data_args or {}))
+            if getattr(train_loader, 'cv_folds', None) is None:
+                raise ValueError(f"Dataset '{args.dataset}' does not build CV fold loaders")
             fold_train, fold_val, fold_test = train_loader.cv_folds[args.fold - 1]
             # Fold 1's train loader is the very loader the resolver tagged with the full fold
             # list; strip the tag so train() runs it as the single fold it is here.
             fold_train.cv_folds = None
             _, logger, _ = train(model, fold_train, fold_val, fold_test, train_args, device)
-            # The selection and ceiling logic below assume a max-direction metric (accuracy).
-            assert logger.mode == 'max'
+            # Selection follows the metric direction the Logger resolved from the evaluator
+            # (max for accuracy-style metrics, min for MAE-style).
+            mode = logger.mode
+            best_of = torch.max if mode == 'max' else torch.min
 
             result = {k: torch.tensor(v) for k, v in logger.results[0].items()}
             per_seed.append({'seed': seed,
-                             'best_train': result['train'].max().item(),
-                             'best_val': result['val'].max().item(),
-                             'best_test': result['test'].max().item()})
+                             'best_train': best_of(result['train']).item(),
+                             'best_val': best_of(result['val']).item(),
+                             'best_test': best_of(result['test']).item()})
 
-            # Accuracy 1.0 is the metric ceiling, so once a seed reaches it on val no later
-            # candidate can displace it under pure val-selection — skip the remaining seeds.
-            if per_seed[-1]['best_val'] >= 1.0:
+            # Max-direction metrics in this repo are bounded above by 1.0 (accuracy, ROC-AUC, AP),
+            # so once a seed reaches that ceiling on val no later candidate can displace it under
+            # pure val-selection — skip the remaining seeds. Min-direction metrics have no
+            # attainable floor, so every seed runs.
+            if mode == 'max' and per_seed[-1]['best_val'] >= 1.0:
                 early_stopped = i + 1 < len(args.seeds)
                 if early_stopped:
                     print(f"Seed {seed} reached val 1.0; skipping remaining seeds {args.seeds[i + 1:]}")
                 break
 
-        # Pure val-selection, first maximum (lowest-index seed) on ties — the convention behind
-        # the committed per-fold best-of-3 numbers, and what makes the early stop above exactly
-        # equivalent to running all N seeds.
-        best = max(per_seed, key=lambda r: r['best_val'])
+        # Pure val-selection, first optimum (lowest-index seed) on ties — the convention behind
+        # the committed per-fold best-of-N numbers, and what makes the ceiling early stop above
+        # exactly equivalent to running all N seeds.
+        select = max if mode == 'max' else min
+        best = select(per_seed, key=lambda r: r['best_val'])
         print(f"Fold {args.fold} best-of-{len(args.seeds)} (ran {len(per_seed)}): seed {best['seed']}, "
               f"val {best['best_val']:.4f}, test {best['best_test']:.4f}")
 
-        # Per-seed fold results as JSON (like brec_eval.py): a single-fold rerun does not fit the
-        # Logger pickle's runs-by-epochs shape, whose runs are folds on these datasets.
+        # Per-seed fold results as JSON (like scripts/pairwise_eval.py): a single-fold run does not
+        # fit the Logger pickle's runs-by-epochs shape, whose runs are folds on these datasets.
         if args.log_dir is not None:
             os.makedirs(args.log_dir, exist_ok=True)
             out = {
@@ -125,7 +131,7 @@ if __name__ == '__main__':
 
     # Training specific arguments/hyperparameters. `--seed` and `--checkpoint_dir` are accepted so
     # the train.py configs parse unchanged; the candidate seeds come from `--seeds`, and this
-    # diagnostic driver saves no checkpoint.
+    # driver saves no checkpoint.
     parser.add_argument('--cuda', default=-1, type=int)
     parser.add_argument('--mem_fraction', default=0.30, type=float)
     parser.add_argument('--seed', default=42, type=int)
@@ -134,7 +140,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_dir', default='out/logs/', type=str)
 
     # Fold is 1-based, matching the run numbering in the train.py logs.
-    parser.add_argument('--fold', default=10, type=int)
+    parser.add_argument('--fold', type=int, required=True)
     parser.add_argument('--seeds', default=[42, 43, 44, 45, 46], type=int, nargs='+')
 
     args = parser.parse_args()

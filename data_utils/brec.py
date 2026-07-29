@@ -2,11 +2,13 @@ import networkx as nx
 import numpy as np
 import torch
 import torch_geometric
+from torch import nn
 from torch.nn import CosineEmbeddingLoss
 from torch_geometric.data import InMemoryDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils.convert import from_networkx
 
+import models
 from data_utils import canonicalize_graph
 
 # BREC RPC (Reliable Paired Comparison) protocol constants, kept verbatim from the reference
@@ -93,6 +95,59 @@ class BRECDataset(InMemoryDataset):
             graphs = [self.pre_transform(g) for g in graphs]
 
         self.save(graphs, self.processed_paths[0])
+
+
+class BRECModel(nn.Module):
+    """Wrap a repo backbone into the BREC test interface.
+
+    A backbone built with `num_pred_heads=None` returns the pooled graph embedding, which a linear
+    head maps to the protocol's `OUTPUT_DIM`. `forward(data)` matches the BREC calling convention
+    `model(data)`; `eig_vec` is forwarded only when the batch carries it (DGN), mirroring
+    `train.py`'s presence-based `_eig_kwargs`. `reset_parameters()` re-initializes both parts, which
+    the per-pair protocol calls before each comparison.
+    """
+
+    def __init__(self, backbone, out_channels, output_dim=OUTPUT_DIM):
+        super(BRECModel, self).__init__()
+        self.backbone = backbone
+        self.head = nn.Linear(out_channels, output_dim)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.backbone.reset_parameters()
+        self.head.reset_parameters()
+
+    def forward(self, data):
+        edge_attr = getattr(data, 'edge_attr', None)
+        eig_kwargs = {'eig_vec': data.eig_vec} if hasattr(data, 'eig_vec') else {}
+        x = self.backbone(data.x, data.edge_index, edge_attr, data.batch, **eig_kwargs)
+        return self.head(x)
+
+
+def build_model(model_query, model_args, deg=None):
+    # Backbones are built directly (not through utils/resolver, whose dataset-coupled build path is
+    # for the graph-level tasks). BREC graphs are featureless, so the node encoder is nn.Linear(1,
+    # emb) and there is no edge encoder; num_pred_heads=None makes the backbone return the pooled
+    # embedding that BRECModel's head turns into the OUTPUT_DIM comparison vector.
+    model_args = dict(model_args)
+    embedding_dim = model_args['hidden_channels']
+    out_channels = model_args['out_channels']
+    model_args.update({
+        'in_channels': embedding_dim,
+        'node_encoder': nn.Linear(1, embedding_dim),
+        'num_pred_heads': None,
+    })
+
+    if model_query == 'LDNA':
+        backbone = models.LDNA(**model_args)
+    elif model_query == 'GIN':
+        backbone = models.GIN(**model_args)
+    elif model_query == 'DGN':
+        backbone = models.DGN(deg=deg, **model_args)
+    else:
+        raise ValueError(f"Could not resolve model '{model_query}' among choices ['LDNA', 'GIN', 'DGN']")
+
+    return BRECModel(backbone, out_channels)
 
 
 def _t2_calculation(model, dataset, device, s_epsilon=True):
@@ -221,3 +276,21 @@ def evaluate(model, dataset, device, seed=SEED, s_epsilon=True, pair_limit=0):
         'total': total,
         'correct_list': correct_list,
     }
+
+
+def print_summary(results):
+    # Mean distinguished counts across the reruns, per category and overall.
+    from statistics import mean, pstdev
+    categories = list(results[0]['per_category'])
+    print("=== Summary across seeds ===")
+    for cat in categories:
+        vals = [r['per_category'][cat]['correct'] for r in results]
+        total = results[0]['per_category'][cat]['total']
+        print(f"{cat}: {mean(vals):.1f} +/- {pstdev(vals):.1f} / {total}")
+    correct = [r['correct'] for r in results]
+    reliable = [r['reliable_correct'] for r in results]
+    fail = [r['fail_reliability'] for r in results]
+    total = results[0]['total']
+    print(f"Correct: {mean(correct):.1f} +/- {pstdev(correct):.1f} / {total}")
+    print(f"Reliable-correct: {mean(reliable):.1f} +/- {pstdev(reliable):.1f} / {total}")
+    print(f"Fail in reliability: {mean(fail):.1f} +/- {pstdev(fail):.1f} / {total}")
