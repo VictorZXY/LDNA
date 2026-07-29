@@ -100,6 +100,27 @@ the last one first if the budget shrinks). Sizes below are from the PyG/OGB meta
 > poor fit for the § Objective SEM margin — their run-to-run spread makes every model a statistical
 > tie, contributing nothing to a ranking claim.
 
+> **Measured node-level diagnostics (2026-07-29, pre-implementation).** Run on the real data before
+> any training compute, to replace estimates with measurements.
+>
+> | Dataset | nodes | mean deg | distinct feature rows | median \|δ\| | P(δ=0) | median node covers 50% at | `num_layers` range |
+> |---|---|---|---|---|---|---|---|
+> | Cora | 2,708 | 3.90 | 99.4% | 0.264 | 0.0002 | k=6 | [2, 8] |
+> | Questions | 48,921 | 6.28 | 76.8% | 0.206 | 0.0010 | **k=4** | **[2, 6]** |
+> | PPI (per graph) | ~1,767 | 18.3 | **17.7%** | **0.036** | **0.156** | k=3 | [2, 5] |
+> | ogbn-arxiv | 169,343 | 13.67 | 99.8% | 0.243 | 0.0001 | k=5 | [2, 7] |
+>
+> Three conclusions. (1) **The rank gap is healthy at every scale** — median \|δ\| is 0.21–0.31 on
+> Cora/Questions/arxiv, refuting the pre-implementation worry that δ collapses on large graphs;
+> δ is a difference of percentiles between two edge endpoints, so it does not shrink with N.
+> (2) **PPI is the predicted tie-collapse case, and it is severe**: only 17.7% of feature rows are
+> distinct (14.5–28.8% across the 20 train graphs), so 15.6% of edges carry δ = 0 exactly and
+> median \|δ\| is an order of magnitude below the others. This is the ZINC failure mode — expect
+> LDNA to be weakest here, and report it rather than hiding it. (3) **`deg^L` is a bad estimator
+> of coverage** and the measured depths supersede it: Questions covers at k=4, not "never" (its
+> ball grows far faster than mean degree predicts — the heavy-tail effect), so its range is [2, 6]
+> rather than the full [2, 8]. Ranges are the measured covering depth + 2.
+
 > **Two constraints the node path must honour** (both load-bearing, decided before implementation).
 > (1) **The canonical rank is precomputed once on the full graph** and carried as a node attribute.
 > `LDNA._canonical_rank` / `_position_rank` currently derive the rank per batch and normalize by
