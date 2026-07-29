@@ -77,8 +77,8 @@
   split-mask columns become 10 per-split shallow `Data` copies sharing x/edge_index/y/nrank,
   riding the train_loader as `cv_folds` the way the EXP/CEXP folds do). `rank_mode: none` is the
   ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
-  sum-of-messages aggregator), paired with the hand-picked, untuned D2 gate-ablation configs
-  `ldna_questions_d2.yaml` / `ldna_questions_d2_ungated.yaml` (identical except the gate; not
+  sum-of-messages aggregator), paired with the hand-picked, untuned gate-ablation configs
+  `ldna_questions_gated.yaml` / `ldna_questions_ungated.yaml` (identical except the gate; not
   run yet). `ogbn-arxiv` is wired full-graph (`configs/ldna_arxiv.yaml`, hand-picked and untuned,
   pending the node-level search): OGB ships split INDEX tensors, so `utils/resolver.py:
   _idx_to_masks` turns them into the boolean `[N]` masks the rest of the node path reads and

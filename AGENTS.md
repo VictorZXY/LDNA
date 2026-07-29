@@ -35,7 +35,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - `ZINC`: graph-level regression.
 - `MNISTSuperpixels`: graph-level multi-class classification.
 - `Cora` (Planetoid): node-level multi-class classification, transductive full-graph. A smoke test for the node-level path, not a reported result.
-- `Questions` (HeterophilousGraphDataset): node-level binary classification (ROC-AUC), transductive full-graph, heterophilous; its 10 official split masks map to `runs` the way the EXP/CEXP folds do. Currently used for the gate-ablation diagnostic (config pair `ldna_questions_d2*.yaml`), not yet a reported result.
+- `Questions` (HeterophilousGraphDataset): node-level binary classification (ROC-AUC), transductive full-graph, heterophilous; its 10 official split masks map to `runs` the way the EXP/CEXP folds do. Currently used for the gate-ablation diagnostic (config pair `ldna_questions_{gated,ungated}.yaml`), not yet a reported result.
 - `ogbn-arxiv`: node-level 40-class classification (accuracy), transductive full-graph, OGB time split. The citation edges are symmetrized with `T.ToUndirected()` for every model, and the OGB split index tensors are converted to boolean node masks. Wired with an untuned config (`ldna_arxiv.yaml`) pending the node-level search; no reported runs yet.
 
 ---

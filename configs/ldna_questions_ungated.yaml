@@ -1,7 +1,7 @@
-experiment_name: ldna_questions_d2_ungated
+experiment_name: ldna_questions_ungated
 
-# DIAGNOSTIC D2 (gate ablation), UNGATED arm -- hand-picked config, NOT tuned, NOT a reported
-# result. Identical to its twin ldna_questions_d2.yaml except `rank_mode: none`, which keeps the
+# DIAGNOSTIC gate ablation, UNGATED arm -- hand-picked config, NOT tuned, NOT a reported
+# result. Identical to its twin ldna_questions_gated.yaml except `rank_mode: none`, which keeps the
 # gate module built but never engaged, so every LDNAConv is a plain sum-of-messages aggregator;
 # the gap to the gated arm measures what the gate contributes at node level. runs=10 maps one run
 # to each of Questions' 10 official split columns (the resolver rides the per-split loader triples
