@@ -17,17 +17,15 @@
   plateau early-stopping, the 50-epoch search cap (vs 150 final), and gradient clipping —
   live in `.claude/experiments.md` (§ Search spaces).
 - `readout` (incl. `attention` = `AttentionalAggregation`) and a per-layer `residual` flag
-  are shared knobs supported by every model family; `DeeperGCN` keeps its intrinsic `res+`
-  and ignores the flag. The resolver unifies every model's encoder width to
-  `hidden_channels`, so the conv stack is uniform and residual skips are identities (a
-  learnable projection covers any `out_channels ≠ hidden_channels`). All configs set
-  `readout: attention` + `residual: true`.
+  are shared knobs supported by every model family (all configs use `readout: attention` +
+  `residual: true`); the resolver unifies every model's encoder width to `hidden_channels`, so
+  the conv stack is uniform. Projection-skip and `DeeperGCN`-`res+` details are in
+  `.claude/experiments.md` § Tuning methodology.
 - Both `train.py` and `hyperparam_search.py` tee each run under `out/logs/` (`utils/tee.py`)
-  and expose an optional `--mem_fraction` per-process GPU cap; the search is OOM-tolerant on
-  shared cards (`empty_cache` between trials, `study.optimize(catch=(RuntimeError,))`). Per the
-  user (2026-07-08), a search that owns its card runs **uncapped** (`--mem_fraction 1.0`) — a
-  cap silently OOM-drops large-hidden trials and biases the search; cap only when co-locating
-  jobs on one card. All outputs (logs + checkpoints) live under `out/`.
+  and expose an optional `--mem_fraction` per-process GPU cap; all outputs (logs + checkpoints)
+  live under `out/`. Search OOM-tolerance and the `--mem_fraction` policy (a search that owns
+  its card runs uncapped) are in `.claude/experiments.md` § Compute & parallelism; log
+  archival is in § Evaluation protocol.
 - LDNA aggregation is rank-gated: `LDNAConv` builds each message from `[x_i, x_j, edge_attr]`
   via an MLP and scales it by a learned gate `1 + gate_nn([δ, |δ|, sign(δ)])` of the
   canonical-rank gap δ = nrank_j − nrank_i (zero-init output layer → identity at init;
@@ -40,28 +38,22 @@
   it has been rerun with the previously tuned shared params on all five graph-level datasets
   (results in `.claude/experiments.md` § Results log).
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
-  `GNN-VPA` (`models/vpa.py` — GIN/GINE backbone with PyG's built-in
-  `VariancePreservingAggregation`, `sum/√N`), and `DGN` (`models/dgn.py` — a PNA-shaped layer
-  whose aggregator set adds the directional `dirK-av`/`dirK-dx`, weighted by the gradient of
-  the low-frequency Laplacian eigenvectors; `DGNConv` is a custom `MessagePassing(aggr=None)`
-  port of the official DGL code, since PyG has no DGN). `GIN` xor `GINE` runs per dataset by
-  edge availability (see `.claude/experiments.md` § Baselines).
+  `GNN-VPA` (`models/vpa.py`), and `DGN` (`models/dgn.py`). `GIN` xor `GINE` runs per dataset by
+  edge availability. Per-model backbones, `DGN`'s directional aggregators, and the GIN/GINE rule
+  are in `.claude/experiments.md` § Baselines.
 - DGN is wired for all five graph-level datasets. Its per-node directional field is attached by
-  the resolver only when the model is `DGN`, and forwarded by `train.py` only when present, so
-  every other baseline's call path is unchanged. On `ZINC`/`ogbg-molhiv`/`ogbg-molpcba`/
-  `MNISTSuperpixels` the field is the low-frequency Laplacian eigenvectors, precomputed by
-  `utils/_utils.py: add_eig_vecs` (per connected component, single-threaded, disk-cached under a
-  connectivity digest). On `ogbg-code2` it is the AST depth via `utils/transforms.py:
-  AddDepthField` — the graphs are trees, so the depth gradient is the parent/child axis, and it
-  costs a view and a cast instead of a sparse eigensolve. Details, measurements and the rejected
-  alternatives are in `.claude/experiments.md` § Baselines.
+  the resolver only when the model is `DGN` and forwarded by `train.py` only when present, so
+  every other baseline's call path is unchanged; the field is the low-frequency Laplacian
+  eigenvectors on the four molecular/image datasets and the AST depth on `ogbg-code2`. Field
+  construction, caching, measurements, and rejected alternatives are in
+  `.claude/experiments.md` § Baselines.
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
-  sequence-prediction path — `ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a
-  guarded fork in `train.py` / `hyperparam_search.py` (per-position CE loss, decode→F1
-  eval, train-split vocab pre-pass); the feature lexsort is skipped because the AST DFS
-  order is already canonical. `ogbg-ppa` is out of scope: its featureless nodes make the
-  feature-based sort non-permutation-invariant, which LDNA's MLP aggregator requires (the
-  sort is a correctness requirement, not a performance lever).
+  sequence-prediction path (`ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a guarded
+  `train.py` / `hyperparam_search.py` fork); the feature lexsort is skipped because the AST DFS
+  order is already canonical. `ogbg-ppa` is out of scope: featureless nodes make the
+  feature-based sort non-permutation-invariant, which LDNA's MLP aggregator requires (the sort
+  is a correctness requirement, not a performance lever). Both are covered in
+  `.claude/experiments.md` § Datasets.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `utils/transforms.py` `__call__`→`forward`; `utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -85,34 +77,17 @@
   - Extras: random continuous init attains ≥ 1-WL a.s. (embeddings refine colours);
     strictness needs no randomness. Feature-tie sorting alone (no individualization)
     is exactly 1-WL — the sort is then purely the invariance device.
-- Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete** (results in
-  `.claude/experiments.md` § Results log). Headline: LDNA decisively breaks the 1-WL ceiling
-  (EXP 1.00 / CEXP 1.00 / BREC **312.0** official — the gate-init variant `gate_init_std: 0.1`,
-  promoted from the zero-init 122.8, which is kept alongside; all with clean reliability
-  controls) while GIN
-  sits on it exactly (0.50 / 0.75 / 0); DGN — the one baseline claiming >1-WL — saturates
-  EXP/CEXP too and scores BREC **144.4** official (its own construction, established by the
-  canonicalization ablation; the shared-canonicalization 271.4 — ≈3-WL level, boosted by the
-  deterministic degenerate eigenbasis — is kept alongside, disclosed in the results log). EXP ran three
-  full 10-fold sweeps (seeds 42/43/44) plus one extra fold-10 seed via `exp_fold_rerun.py`
-  (the reusable single-fold driver). The DGN BREC canonicalization ablation is **done**
-  (2026-07-28): under the benchmark's own raw-graph6 construction (`BRECDataset(canonical=False)`)
-  DGN scores 144.4±0.7 vs 271.4±1.0 canonical, the drop confined to the degenerate families
-  (Basic bit-identical) with the GIN regime-change control at exactly 0 on both builds — DGN is
-  genuinely >1-WL unaided, and the rest of its committed score is the disclosed canonicalization
-  effect. Details in `.claude/experiments.md` (§ Results log).
-  The canonical-labelling side of the theory is now code:
-  `utils/_utils.py: canonicalize_graph(s)` (pynauty; lazy import so machines without it
-  are unaffected) permutes each graph into the nauty canonical order — the data-side
-  replacement for the feature lexsort on datasets whose features cannot impose an order —
-  and LDNA reads it via the existing `rank_mode: position`. EXP/CEXP (GNN-RNI SAT pairs)
-  run through the standard loop with the paper's contiguous 10-fold CV (folds map onto
-  `runs` via a small hook in `train.py`; `utils/exp.py`, `AccuracyEvaluator`). BREC runs
-  through a dedicated entry point (`brec_eval.py` + the ported RPC core in `utils/brec.py`)
-  since its pairwise protocol fits neither the epoch loop nor the Logger. Model set is
-  LDNA + GIN + DGN only (the other baselines are provably ≤ 1-WL and recorded at the
-  ceiling); no hyperparameter search (protocol constants). Decisions and deviations are in
-  `.claude/experiments.md` (§ Datasets → batch-3 notes, § Experiment queue).
+- Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete**. Headline: LDNA breaks the
+  1-WL ceiling (EXP 1.00 / CEXP 1.00 / BREC **312.0** official — the `gate_init_std: 0.1`
+  gate-init variant, with zero-init 122.8 kept alongside) while GIN sits on it exactly
+  (0.50 / 0.75 / 0) and DGN saturates EXP/CEXP and scores BREC **144.4** official (271.4 under
+  shared canonicalization). These datasets are featureless, so the permutation-invariance device
+  is a nauty canonical labelling (`utils/_utils.py: canonicalize_graph(s)`) read by LDNA via
+  `rank_mode: position`; the model set is LDNA + GIN + DGN and there is no hyperparameter search
+  (protocol constants). EXP/CEXP run through the standard loop (10-fold CV); BREC uses a
+  dedicated entry point (`brec_eval.py`, `utils/brec.py`). Full results, the DGN BREC
+  canonicalization ablation, and all protocol decisions are in `.claude/experiments.md`
+  (§ Results log, § Datasets → batch-3 notes, § Experiment queue).
 
 ---
 
@@ -128,9 +103,9 @@
 - GPU policy: prefer idle GPUs, keep them busy, share freely, never OOM anyone (see
   `.claude/experiments.md` § Compute & parallelism).
 - Compute spans two machines: local `ee-kraken` (4× RTX A6000 49GB) and remote `ee-tiamat`
-  (H100 95GB, `ssh ee-tiamat`, repo/env mirrored, code synced via GitHub). The heaviest
-  datasets (`ogbg-molpcba`, `ogbg-code2`) suit the H100. Datasets are cached under `data/`
-  on both machines.
+  (H100 95GB); the heaviest datasets (`ogbg-molpcba`, `ogbg-code2`) suit the H100 and are cached
+  under `data/` on both. SSH access, repo/env mirroring, and GitHub sync are in
+  `.claude/experiments.md` § Compute & parallelism.
 
 ---
 
