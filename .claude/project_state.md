@@ -73,7 +73,8 @@
   already yields per-node output. Evaluators added: `OGBNodeEvaluator`, `ROCAUCEvaluator`,
   `MicroF1Evaluator`; `AccuracyEvaluator` gained a `.view(-1)` fixing an `[N]`-vs-`[N,1]`
   broadcast. Only `Cora` is wired so far (`configs/ldna_cora.yaml`), as an unreported smoke test.
-- Under test (A/B configs written, not yet run): a 1-WL-refined canonical rank for ZINC, whose
+- Tested and **rejected on the evidence** (2026-07-29; A/B in `.claude/experiments.md` § Results
+  log): a 1-WL-refined canonical rank for ZINC, whose
   single atom-type column ties the feature rank on 53% of train edges (gate sees δ = 0 there).
   `node_rank` / `add_node_ranks` gained `wl_steps` (default 0 = exact prior behavior):
   `data_utils/preprocess.py: _wl_refine` refines the feature-tie partition by 1-WL color
@@ -83,8 +84,14 @@
   `nrank` for LDNA only (presence-routing, as with DGN's `eig_vec`), riding the existing
   `_nrank_kwargs` path that bypasses the runtime `_canonical_rank`. Measured P(δ=0) on
   ZINC-subset train: 0.530 (k=0) → 0.141 → 0.041 → 0.0085 (k=3, chosen) → 0.0048 stable floor
-  (genuinely 1-WL-equivalent adjacent pairs). A/B: `configs/ldna_zinc_subset.yaml` (control) vs
-  `configs/ldna_zinc_subset_wl.yaml` (`wl_steps: 3`), single run each on the 12k subset.
+  (genuinely 1-WL-equivalent adjacent pairs). The A/B (`configs/ldna_zinc_subset.yaml` control vs
+  `configs/ldna_zinc_subset_wl.yaml`, one run each on the 12k subset) came out **negative**: the
+  refinement removes the ties it targets and the gate reacts to them, but test MAE is 0.3353 vs
+  the control's 0.3305 — no gain, because ZINC's unrefined δ is a *chemical* signal that the
+  refinement destroys (δ = 0 ⟺ bonded atoms share an element, exactly) and a k-step WL colour is
+  what k rounds of message passing already derive. Measurements and the full reasoning are in the
+  results-log row. The code stays (`wl_steps` defaults to 0, a provable no-op) so the negative is
+  reproducible; full ZINC was not re-run.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
   so runs are independent for LDNA and every baseline alike, applied in the caller with no
