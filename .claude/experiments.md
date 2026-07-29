@@ -461,8 +461,21 @@ searched value would apply to LDNA and every baseline): `readout`
 
 `hyperparam_search.py` covers **all five graph-level datasets**. Expressiveness search is
 **not needed** (batch-3 hyperparameters are protocol constants — see § Datasets → batch-3
-notes). Node-level search still has to be added, and lands with the node-level pipeline
-(§ Implementation queue). Per-dataset overrides go here: TODO.
+notes). Per-dataset overrides go here: TODO.
+
+**Node-level search space** (`Questions`, `ogbn-arxiv` — the two wired node datasets). Same
+`dropout` / `lr` / `weight_decay` ranges as above; `batch_size` does not exist (full-graph).
+Everything else differs because one epoch is **one optimizer step**, not 130–680:
+
+| Hyperparameter | Range / choices | Notes |
+|---|---|---|
+| `hidden_channels` | {128, 256} | 128 is a hard floor (a narrower per-node head trips `num_pred_heads > out_channels` on PPI's 121 tasks); 256 is the widest that fits arxiv full-graph |
+| `num_layers` | `Questions` [2, 6], `ogbn-arxiv` [2, 7] | the measured k-hop covering depth + 2 (§ Datasets → node-level) |
+| LR schedule | **none** | constant LR, per § Evaluation protocol; `ReduceLROnPlateau(patience=10)` is ten *steps* here |
+| early stopping | **off** | `patience=20` is 20 steps (2% of the budget), and its calibration (2× the scheduler patience) is void with no scheduler |
+| `epochs` | search cap **333**; final **1000** | same one-third ratio as the graph-level 50/150 pair; the measured optimum falls near step 150 for both configs at lr ≥ 1e-3, well inside the cap |
+| trial score | **best epoch**, not the last-five median | the node runs report `Logger`'s best-over-epochs value, and with a constant LR the curve is not monotone. Measured on Questions (split 0, 1000 steps): h=128/L=3 at lr 3e-3 peaks at **0.742** near step 150 and decays to 0.609 by step 1000; h=256/L=5 at lr 1e-3 peaks at 0.730, also near step 150; h=128/L=3 at lr 3e-4 climbs slowly to 0.735 at step 800. Best-epoch ranks them 0.742 / 0.735 / 0.730 — what the final runs would report; a last-five median ranks the slow config first at every cap ≥ 333 and scores the best config 0.618 |
+| memory prune | `optuna.TrialPruned()` when the predicted full-graph peak exceeds `mem_fraction ×` the card | peak ≈ 6.1 GiB × L × (h/128) × (edges / 2.32M), from the arxiv measurement above. Pruning makes an infeasible corner visible; an OOM would be swallowed by the study's `catch=(RuntimeError,)` and bias the search away from a region it never scored, so the estimate deliberately errs permissive |
 
 ---
 
@@ -678,7 +691,8 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 - [x] Add `BREC` (dataset + ported RPC pairwise evaluation; `data_utils/brec.py`, `scripts/pairwise_eval.py`).
 - [x] ~~Extend `hyperparam_search.py` to expressiveness datasets~~ — resolved as **not needed**:
       batch-3 hyperparameters are protocol constants (see § Datasets → batch-3 notes). Node-level
-      search support still lands with the node-level pipeline.
+      search support is wired for the two node datasets that exist (`Questions`, `ogbn-arxiv`),
+      with its own space and step-counted regime (§ Search spaces → node-level).
 
 ---
 
