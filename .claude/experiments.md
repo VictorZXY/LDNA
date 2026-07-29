@@ -664,9 +664,7 @@ and would distort the mean; see the note below.)
   at 3.16× LDNA's params on average** (excl. code2; up to 4.8× / 3.6× per dataset); every other
   baseline is ≤0.73×. So PNA's #1 on ZINC/MNIST and DGN's #1 on ZINC/code2 come with a large
   capacity advantage (and, for DGN, a hand-supplied directional field), while LDNA reaches top-2
-  at ≈1/4 of PNA's and ≈1/3 of DGN's params — an efficiency point in LDNA's favour. A
-  param-normalised comparison (tune each model's width so params ≈ LDNA's) is a possible
-  **future** supplementary experiment — not run yet, per user.
+  at ≈1/4 of PNA's and ≈1/3 of DGN's params — an efficiency point in LDNA's favour.
 
 ---
 
