@@ -25,7 +25,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - LDNA is the method studied here. It sorts graph inputs into a canonical order before model execution, then trains a learnable neighborhood aggregation model implemented in code as `LDNA` and `LDNAConv`.
 - The repository is centered on running experiments rather than packaging a reusable library. It compares LDNA against several baseline GNN families under the same general training pipeline.
 - The project runs in a Conda environment named `LDNA`.
-- All reported experiments are graph-level. Node-level (transductive, per-node) prediction is implemented but not yet reported: only the full-graph `Cora` smoke test is wired, and sampling, layer-wise inference, and the remaining node datasets are still to come.
+- All reported experiments are graph-level. Node-level (transductive, per-node) prediction is implemented but not yet reported: only the full-graph `Cora` smoke test, `Questions` (diagnostics only) and `ogbn-arxiv` are wired, and sampling, layer-wise inference, and the remaining node datasets are still to come.
 
 ---
 
@@ -35,13 +35,15 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` â
 - `ZINC`: graph-level regression.
 - `MNISTSuperpixels`: graph-level multi-class classification.
 - `Cora` (Planetoid): node-level multi-class classification, transductive full-graph. A smoke test for the node-level path, not a reported result.
+- `Questions` (HeterophilousGraphDataset): node-level binary classification (ROC-AUC), transductive full-graph, heterophilous; its 10 official split masks map to `runs` the way the EXP/CEXP folds do. Currently used for the gate-ablation diagnostic (config pair `ldna_questions_d2*.yaml`), not yet a reported result.
+- `ogbn-arxiv`: node-level 40-class classification (accuracy), transductive full-graph, OGB time split. The citation edges are symmetrized with `T.ToUndirected()` for every model, and the OGB split index tensors are converted to boolean node masks. Wired with an untuned config (`ldna_arxiv.yaml`) pending the node-level search; no reported runs yet.
 
 ---
 
 ## Model families
 
 - LDNA model: `LDNA` in `models/ldna_net.py`, with `LDNAConv` in `models/ldna_conv.py`.
-  - `LDNAConv` is a custom `MessagePassing` layer (`aggr=None`): each message is built from `[x_i, x_j, edge_attr]` through an MLP, modulated by a learned gate of the canonical-rank gap (initialized to identity by default; an optional `gate_init_std` starts it slightly off identity, used only on the synthetic expressiveness benchmarks), summed per node, then run through a post-MLP. The `LDNA` wrapper computes a per-node canonical rank feeding that gate, with two modes (`rank_mode`): a feature-tie rank for feature-sorted datasets, and a position rank for datasets whose node order is canonical by construction (e.g. `ogbg-code2`).
+  - `LDNAConv` is a custom `MessagePassing` layer (`aggr=None`): each message is built from `[x_i, x_j, edge_attr]` through an MLP, modulated by a learned gate of the canonical-rank gap (initialized to identity by default; an optional `gate_init_std` starts it slightly off identity, used only on the synthetic expressiveness benchmarks), summed per node, then run through a post-MLP. The `LDNA` wrapper computes a per-node canonical rank feeding that gate, with two modes (`rank_mode`): a feature-tie rank for feature-sorted datasets, and a position rank for datasets whose node order is canonical by construction (e.g. `ogbg-code2`). A third value, `rank_mode: none`, is the ungated ablation (the gate module exists but never engages), used only for the node-level gate diagnostic.
   - `LDNA` wraps a node/edge encoder, a stack of `LDNAConv + BatchNorm + activation + dropout` layers (with optional per-layer residual connections, `residual`), a graph readout, and an MLP prediction head.
   - Readout modes: `add`, `max`, `mean`, `gru`, and `attention`. The `gru` readout runs a GRU over the canonically-sorted node sequence, which is the mechanism that exploits the sort; `attention` is a learnable `AttentionalAggregation` pooling. (Current configs use `attention`.)
 - Baseline models in `models/`: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`, `GNN-VPA`, and `DGN`.

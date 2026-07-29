@@ -58,9 +58,13 @@ class LDNA(nn.Module):
         # Source of the per-node canonical rank fed to each conv's gate. 'feature' assumes the
         # data-side lexicographic sort (sort_graphs) and ranks by feature-row ties; 'position'
         # assumes the data already carries a canonical node order (e.g. ogbg-code2's AST DFS order,
-        # which is not feature-sorted) and ranks by normalized intra-graph position.
-        if rank_mode not in ('feature', 'position'):
-            raise ValueError(f"Argument `rank_mode` must be 'feature' or 'position', got '{rank_mode}'")
+        # which is not feature-sorted) and ranks by normalized intra-graph position. 'none' is the
+        # ungated ablation for the node-level gate diagnostic (D2): no rank ever reaches the convs,
+        # so the gate module still exists but never engages and every layer is a plain
+        # sum-of-messages aggregator.
+        if rank_mode not in ('feature', 'position', 'none'):
+            raise ValueError(f"Argument `rank_mode` must be 'feature', 'position' or 'none', "
+                             f"got '{rank_mode}'")
         self.rank_mode = rank_mode
 
         self.act = activation_resolver(act, **(act_kwargs or {}))
@@ -160,7 +164,12 @@ class LDNA(nn.Module):
         # rather than a set of complete graphs — deriving the rank here would rank the slice. This
         # mirrors DGN's precomputed `eig_vec` kwarg and keeps the shared forward signature additive:
         # graph-level callers pass nothing and fall through to the per-batch derivation unchanged.
-        if nrank is None:
+        # 'none' forces the rank off even when the batch carries a precomputed one, so
+        # LDNAConv.message's `nrank_i is not None` branch never engages the gate (the gate ablation,
+        # diagnostic D2 — see __init__).
+        if self.rank_mode == 'none':
+            nrank = None
+        elif nrank is None:
             nrank = self._position_rank(x, batch) if self.rank_mode == 'position' \
                 else self._canonical_rank(x, batch)
 

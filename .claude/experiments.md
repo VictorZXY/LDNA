@@ -62,18 +62,18 @@ exists but not tuned/run; `todo` = not implemented.
 ### 2. Node-level prediction
 
 The node-level **pipeline is implemented** (transductive masked training loop, per-node head
-via `readout=None`, precomputed canonical rank); of the datasets below **none is wired yet** —
-only the unreported `Planetoid` Cora smoke test is. Sampling and layer-wise inference are still
-to come. Loaders are from `torch_geometric.datasets` / `ogb.nodeproppred`.
+via `readout=None`, precomputed canonical rank); of the datasets below only `Questions` is
+wired (diagnostics only, no reported runs), plus the unreported `Planetoid` Cora smoke test.
+Sampling and layer-wise inference are still to come. Loaders are from `torch_geometric.datasets` / `ogb.nodeproppred`.
 
 Five reported datasets, matching the graph-level count, listed in **priority order** (cut
 the last one first if the budget shrinks). Sizes below are from the PyG/OGB metadata.
 
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
-| `ogbn-arxiv` | 40-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 169k nodes / 1.17M edges; OGB **time** split (train ≤2017 / val 2018 / test 2019); the only dataset runnable **both** full-graph and sampled — hence the sampling control (see notes) |
+| `ogbn-arxiv` | 40-class node classification | accuracy | max | `OGBNodeEvaluator` | partial | 169k nodes / 1.17M directed edges, symmetrized by `T.ToUndirected()` to 2,315,598 entries (a preprocessing choice shared by all models, since every model here aggregates over an undirected neighbourhood); OGB **time** split (train ≤2017 / val 2018 / test 2019) shipped as index tensors, converted to boolean masks by `_idx_to_masks` (90,941 / 29,799 / 48,603, a partition verified at load); the only dataset runnable **both** full-graph and sampled — the sampled control is still to come. Hand-picked untuned config `configs/ldna_arxiv.yaml`; no runs yet |
 | `ogbn-products` | 47-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 2.45M nodes / 61.9M edges; OGB `sales_ranking` split; neighbor sampling required. The scale anchor |
-| `Questions` (`HeterophilousGraphDataset`) | binary node classification | ROC-AUC | max | custom (ROC-AUC) | todo | 48.9k nodes / 154k edges / 301 features; **heterophilous** — the one non-homophilous entry; ships 10 official split masks (`train_mask` is `[N, 10]`), so splits map to `runs` the way EXP folds do |
+| `Questions` (`HeterophilousGraphDataset`) | binary node classification | ROC-AUC | max | `ROCAUCEvaluator` | partial | 48.9k nodes / 154k edges / 301 features; **heterophilous** — the one non-homophilous entry; ships 10 official split masks (`train_mask` is `[N, 10]`), so splits map to `runs` the way EXP folds do (per-split shallow `Data` copies share x/edge_index/y/nrank; the fold list rides the train_loader as `cv_folds`); single BCE logit (`num_pred_heads=1`, float `[N, 1]` y). Wired for the D2 gate ablation (`configs/ldna_questions_d2*.yaml`); no reported runs yet |
 | `PPI` | 121-task multi-label | micro-F1 | max | custom (micro-F1) | todo | 24 graphs (20 train / 2 val / 2 test), ~2.2k nodes each; **inductive** and multi-graph, so it reuses the existing `DataLoader` path — only the head changes (no pooling). Carries the multi-label axis `ogbn-proteins` was to provide |
 | `Reddit` | 41-class node classification | accuracy | max | `AccuracyEvaluator` | todo | 233k nodes / **114.6M** edges (mean degree ~492) — the density stress case for `LDNAConv`'s edge-level MLP; neighbor sampling required. Weakest citability (only NAGphormer reports it, on a non-standard 60/20/20 split), so it buys the O(E)-at-scale claim rather than a comparison |
 
@@ -134,6 +134,22 @@ the last one first if the budget shrinks). Sizes below are from the PyG/OGB meta
 > DGN, GINE) and the sparse-matmul models (GCN, SAGE) have very different memory profiles, so
 > letting the regime vary per model would break the shared-hyperparameter fairness premise.
 > `ogbn-arxiv` is run **both ways** to quantify what sampling costs.
+
+> **Measured full-graph memory on `ogbn-arxiv` (2026-07-29).** LDNA, 3 real training steps,
+> `torch.cuda.max_memory_allocated` on an RTX A6000 (49 GB):
+>
+> | h | L | peak allocated | peak reserved |
+> |---|---|---|---|
+> | 128 | 3 | 18.33 GiB | 21.02 GiB |
+> | 256 | 3 | 35.58 GiB | 36.27 GiB |
+>
+> Scaling is linear in both width and depth — ≈6.1 GiB per layer at h=128, ≈11.9 at h=256 — so
+> **peak ≈ 6.1 GiB × L × (h / 128)**, dominated by `LDNAConv`'s per-edge activations over 2.3M
+> edges rather than by the 0.2–0.7M parameters. The `mem_fraction` cap applies to RESERVED memory,
+> which ran 2–15% above allocated here, so leave that margin. At the 0.85 cap on a 49 GB card (≈41.8 GiB)
+> that admits **L ≤ 6 at h=128, L ≤ 3 at h=256, L ≤ 1 at h=512** full-graph. The (h, L) box of the
+> node-level search must respect this: arxiv's measured depth range [2, 7] is reachable at h=128
+> only up to L=6, and the deeper/wider corner needs the sampled regime.
 
 ### 3. Synthetic expressiveness
 
@@ -566,9 +582,16 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
       (`data_utils/preprocess.py: node_rank` / `add_node_ranks`), and the three node
       evaluators. **Still to come**: GraphSAINT sampling and layer-wise exact inference.
 - [x] `Planetoid` Cora — smoke test for the node path only; not reported.
-- [ ] Add `ogbn-arxiv` (OGB split + evaluator; full-graph run plus the sampled control).
+- [ ] Add `ogbn-arxiv` (OGB split + evaluator; full-graph run plus the sampled control) —
+      **full-graph path wired 2026-07-29** (`_idx_to_masks` index→mask conversion, shared
+      `T.ToUndirected()` symmetrization, `OGBNodeEvaluator`, untuned `configs/ldna_arxiv.yaml`,
+      measured memory above); the sampled control and the runs themselves are still open.
 - [ ] Add `ogbn-products` (neighbor sampling; OGB evaluator).
-- [ ] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator).
+- [x] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator) —
+      wired 2026-07-29 together with `rank_mode: none` (ungated LDNA: the gate module exists but
+      never engages) and the hand-picked, untuned D2 gate-ablation config pair
+      `configs/ldna_questions_d2.yaml` / `ldna_questions_d2_ungated.yaml` (identical arms except
+      the gate; 10 runs = the 10 official splits). The A/B itself is not run yet.
 - [ ] Add `PPI` (inductive multi-graph; multi-label micro-F1 evaluator).
 - [ ] Add `Reddit` (neighbor sampling; density stress case).
 
@@ -671,6 +694,39 @@ finished fold-10 rerun — see § Results log.)
       protocol seed is not single-factor — attribute only deltas exceeding the committed ±9.2
       spread. (An earlier Basic-only 20-pair probe, run before pair_limit became per-category,
       is superseded by this protocol.)
+
+**Node-level Phase 0 — diagnostic D2: does the rank gate do anything at node level?** The
+node-level plan numbers its pre-compute diagnostics D0–D4; D0/D1/D4 are the measured table in
+§ Datasets → node-level. **D2 is the one with a stop condition attached**, so its protocol is
+pre-committed here rather than left to be read off the configs.
+
+- **Question.** LDNA's only structural difference from a plain sum-aggregating MPNN is the
+  rank gate. At graph level it earns its place (the rank-gated rerun beat the old aggregator on
+  every dataset). Node level is a different regime — one graph, one gradient step per epoch, and
+  a rank taken over the whole graph rather than a ~23-node molecule — so the gate's contribution
+  has to be re-established, not assumed.
+- **Arms.** `configs/ldna_questions_d2.yaml` (gated) vs `configs/ldna_questions_d2_ungated.yaml`
+  (`rank_mode: none`, which forces `nrank=None` so `LDNAConv.message` skips the gate and every
+  conv is a plain sum-of-messages aggregator). Verified single-factor by the independent review:
+  identical parameter count (211,265; the 13,056 gate params are built and reset in both arms and
+  simply receive no gradient in the ungated one), identical RNG stream, and bit-identical per-run
+  initial weights — so the two arms compute the identical function at init and differ only in
+  whether the gate can learn.
+- **Dataset: `Questions`, not Cora.** Cora is a smoke test whose accuracy is not a criterion; and
+  a 2,708-node graph's run-to-run spread makes every comparison a tie. Questions ships 10 official
+  splits, which give 10 paired runs for free.
+- **Deciding metric, pre-committed.** Test ROC-AUC **at the best-validation epoch** (not the
+  logger's printed `best_test`, which is a max over epochs — see § Evaluation protocol), compared
+  **paired by split**: the two arms share folds and initial weights, so the paired per-fold
+  difference is the right statistic and is far tighter than an unpaired mean ± std. Decision rule:
+  the gate is judged to contribute if the mean paired difference exceeds the SEM of that paired
+  difference over the 10 splits.
+- **Stop condition (from the node-level plan).** If the arms are within SEM, stop and report
+  before spending Phase 2 tuning/ranking compute — the mechanism would be contributing nothing at
+  node level, which is a finding about the method, not a bug to fix.
+- **Hyperparameters are hand-picked and shared across arms** (h128/L3/dropout 0.5/residual), not
+  tuned: a diagnostic asking "does the gate move the metric at all" does not need a tuned config,
+  and any config error is common to both arms. Not a reported result either way.
 
 ---
 
