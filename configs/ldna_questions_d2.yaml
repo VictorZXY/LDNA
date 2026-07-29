@@ -30,16 +30,13 @@ mem_fraction: 0.85
 seed: 42
 train_args:
   runs: 10
-  epochs: 500
-  eval_interval: 50
+  epochs: 1000
+  eval_interval: 100
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 1.0e-3
+    lr: 3.0e-3
     weight_decay: 5.0e-4
-  scheduler: ReduceLROnPlateau
-  scheduler_kwargs:
-    mode: max
   evaluator: ROCAUCEvaluator
 checkpoint_dir: out/checkpoints/
 log_dir: out/logs/

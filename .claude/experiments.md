@@ -497,11 +497,52 @@ notes). Node-level search still has to be added, and lands with the node-level p
   constant LR is not per-model-neutral, but neither is a plateau scheduler, which fires on
   whichever model plateaus first and penalizes slow starters invisibly; genuine per-model
   adaptivity would require per-model LR tuning, which § Tuning methodology forbids.
+  - Evidence base: **~15 independent node-level codebases, none of which decays the LR** —
+    OGB's five node examples, Platonov, tunedGNN, Polynormer, SGFormer, NodeFormer, DIFFormer,
+    LINKX, GCNII, SGC, DeeperGCN, DGL's arxiv GAT (`grep -c 'scheduler|Cosine|Plateau'` is
+    literally 0 in Polynormer's and SGFormer's `main.py`). The one counterexample, **NAGphormer**
+    (PolynomialDecayLR + 400 warmup updates), is a *minibatch tokenized* transformer of the
+    Graphormer lineage and inherits NLP conventions, not full-graph GNN ones — so it does not
+    bear on this regime. **Warmup is a separate mechanism from decay** and does appear twice
+    (DGL's arxiv GAT warms up linearly over 50 epochs then holds; Platonov's LambdaLR is
+    warmup-capable with the feature off by default). If early-step instability ever shows up,
+    warmup is the field-sanctioned and citable fix; decay is not.
+  - **Step budget: a cap, not a target.** No source justifies its budget or reports an
+    accuracy-vs-steps curve for full-graph node classification, and the numbers do not scale
+    with graph size (GCNII gives 2.7k-node Cora 1500 steps; OGB gives 169k-node arxiv 500).
+    Full-graph budgets cluster at **500–2500, with 1000 the single most common value**. The only
+    real correlate is that `lr × steps` is tighter within a dataset than either factor alone —
+    evidence that each work tuned the pair jointly on validation, not a law (it breaks across
+    datasets). So the budget only has to be long enough to contain the optimum, and the check
+    worth reporting is that the optimum falls well inside it rather than at the boundary.
   - Reference protocols, for the record: **Platonov et al.** (`Questions`' own paper) — AdamW,
     lr 3e-5, weight decay 0, **1000 steps**, no schedule, no early stopping, 10 runs one per
     official split, 225 reproduction invocations with zero hyperparameter overrides.
     **OGB `ogbn-arxiv`** — Adam, lr 0.01, weight decay 0, 500 epochs, no scheduler, hidden 256,
-    3 layers, dropout 0.5, BatchNorm. **tunedGNN** — Questions 1500 epochs, arxiv 2000.
+    3 layers, dropout 0.5, BatchNorm. **tunedGNN** — Questions 1500, arxiv 2000.
+    **Polynormer** — Questions 1700, arxiv 2000. **SGFormer** — 1000 with early-stop patience 200.
+  - **`ogbn-arxiv` needs `runs: 10`.** The OGB rules require the mean and unbiased std to be
+    taken over 10 random seeds (https://ogb.stanford.edu/docs/leader_overview/); fewer is not
+    comparable to any published arxiv number. Config updated from 2.
+  - **Our LR is validation-selected, not inherited — say so precisely.** Three official repos
+    (Platonov, tunedGNN, Polynormer) all use **3e-5** on Questions, and tunedGNN's paper table
+    saying 1e-3 is a lone outlier contradicted by its own script. Our probe selects 3e-3 on
+    validation (val 0.7556 / test 0.7585 at 1000 steps, single split), which lands inside the
+    published 76–79 band but gives an `lr × steps` product ~3 against their ~0.04. Their 3e-5 is
+    entangled with their architecture (hidden 512, pre-norm residual blocks). The accurate claim
+    is therefore "we follow their budget and selection rule, with the LR tuned on validation" —
+    **not** "we follow Platonov's protocol".
+  - **The shared `epochs` knob stops meaning one thing once sampling starts.** On `PPI`
+    (inductive, 20 train graphs), `Reddit` and `ogbn-products` (both sampled), one epoch is many
+    optimizer steps, so a single `epochs` value fixed across the node suite would fix wildly
+    different step counts per dataset. Decide before those land: specify the node protocol in
+    **optimizer steps** and derive `epochs` per dataset, or state plainly that full-graph and
+    sampled datasets carry separate budgets. Reference budgets there: products Cluster-GCN
+    50 epochs / 15000 partitions / batch 32; Reddit 10 epochs at batch 512–1024 (GraphSAGE, PyG)
+    or 40 sampled epochs (GraphSAINT); PPI 100 epochs × 20 graphs ≈ 2000 steps (PyG).
+  - **`PNA` has no upstream node-level recipe** — its repo ships graph-level configs only
+    (ZINC, HIV, MNIST, CIFAR10). It is in our node suite, so it will be configured without an
+    upstream reference; record that in the fairness write-up rather than implying one exists.
   - Sanity anchors (what "training works" looks like): **Questions** test ROC-AUC **76–79**
     (Platonov Table 4: GCN 76.09, SAGE 76.44, GAT 77.43, best FSGNN 78.86); **ogbn-arxiv**
     full-graph test accuracy **71.5–73.6%** (OGB leaderboard GCN 71.74; tunedGNN re-tuned

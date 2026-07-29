@@ -28,17 +28,14 @@ cuda: 3
 mem_fraction: 0.85
 seed: 42
 train_args:
-  runs: 2
-  epochs: 500
-  eval_interval: 50
+  runs: 10
+  epochs: 1000
+  eval_interval: 100
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
     lr: 1.0e-3
     weight_decay: 5.0e-4
-  scheduler: ReduceLROnPlateau
-  scheduler_kwargs:
-    mode: max
   evaluator: OGBNodeEvaluator
   evaluator_kwargs:
     name: ogbn-arxiv
