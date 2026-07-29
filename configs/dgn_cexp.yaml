@@ -19,7 +19,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: CEXP
 data_args:
-  root: data/CEXP/
+  root: data/cexp/
   batch_size: 20
 
 # Training specific arguments/hyperparameters

@@ -1,6 +1,6 @@
-experiment_name: gin_brec_noncanon
+experiment_name: gin_brec_no_canonical
 
-# Non-spectral control for the canonicalization ablation (see dgn_brec_noncanon.yaml): GIN's
+# Non-spectral control for the canonicalization ablation (see dgn_brec_no_canonical.yaml): GIN's
 # aggregation is exactly permutation-invariant, so its embeddings cannot depend on the node
 # order the ablation
 # removes — if GIN stays at its committed 0/400 with clean reliability on the non-canonical build,
@@ -24,7 +24,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: BREC
 data_args:
-  root: data/brec_noncanon
+  root: data/brec
   canonical: false
 
 # Evaluation specific arguments/hyperparameters

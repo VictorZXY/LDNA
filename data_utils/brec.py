@@ -56,11 +56,12 @@ class BRECDataset(InMemoryDataset):
     ``canonical=False`` skips the canonicalization and keeps the raw graph6 node order — the
     reference benchmark's own construction, in which the 32 copies of a graph stay genuinely
     permuted. It exists for the DGN attribution ablation (how much of DGN's score rides on the
-    canonical order making its degenerate Laplacian eigenbasis consistent across copies) and is
-    given its own processed filename; point it at a separate ``root`` so the sidecar eigenvector
-    cache also stays apart from the main one. When several configs target a freshly-created root,
-    build it once from a single process first — PyG's ``process()`` has no locking, so two cold
-    starts would race on the same multi-hundred-MB ``torch.save``.
+    canonical order making its degenerate Laplacian eigenbasis consistent across copies). Both
+    builds share one ``root``: each has its own processed filename, and the sidecar eigenvector
+    cache name carries the flag too (see scripts/pairwise_eval.py), so the two can never thrash
+    (or overwrite) each other. When several configs target a freshly-created root, build it once
+    from a single process first — PyG's ``process()`` has no locking, so two cold starts would
+    race on the same multi-hundred-MB ``torch.save``.
     """
 
     def __init__(self, root='data/brec', canonical=True, transform=None, pre_transform=None,
@@ -75,7 +76,7 @@ class BRECDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['brec_v3.pt' if self.canonical else 'brec_v3_noncanon.pt']
+        return ['brec_v3.pt' if self.canonical else 'brec_v3_no_canonical.pt']
 
     def process(self):
         data_list = np.load(self.raw_paths[0], allow_pickle=True)

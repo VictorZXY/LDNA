@@ -17,7 +17,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: EXP
 data_args:
-  root: data/EXP/
+  root: data/exp/
   batch_size: 20
 
 # Training specific arguments/hyperparameters

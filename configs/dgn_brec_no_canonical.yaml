@@ -1,4 +1,4 @@
-experiment_name: dgn_brec_noncanon
+experiment_name: dgn_brec_no_canonical
 
 # DGN BREC canonicalization ablation: the dataset is built WITHOUT the shared nauty
 # canonicalization (raw graph6 node order — the reference benchmark's own construction), isolating
@@ -24,7 +24,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: BREC
 data_args:
-  root: data/brec_noncanon
+  root: data/brec
   canonical: false
 
 # Evaluation specific arguments/hyperparameters

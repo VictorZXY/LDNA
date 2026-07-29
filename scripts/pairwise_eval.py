@@ -57,7 +57,7 @@ def main(args):
             # carries the `canonical` flag like the processed filename does, so alternating the
             # flag under one root can never thrash (or overwrite) the other build's cache.
             num_eig_vec = model_args.get('num_eig_vec', 1)
-            cache_name = 'all' if dataset.canonical else 'all_noncanon'
+            cache_name = 'all' if dataset.canonical else 'all_no_canonical'
             dataset = add_eig_vecs(dataset, k=num_eig_vec, cache_name=cache_name)
             deg = degree_histogram(dataset)
 
