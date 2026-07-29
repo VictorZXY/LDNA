@@ -135,13 +135,25 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         transform = UnsqueezeTargetDim()
         subset = dataset_kwargs.pop('subset', False)
         wl_steps = dataset_kwargs.pop('wl_steps', 0)
+        canonical = dataset_kwargs.pop('canonical', False)
         train_dataset = ZINC(subset=subset, split='train', pre_transform=transform, **dataset_kwargs)
         val_dataset = ZINC(subset=subset, split='val', pre_transform=transform, **dataset_kwargs)
         test_dataset = ZINC(subset=subset, split='test', pre_transform=transform, **dataset_kwargs)
 
-        train_dataset = sort_graphs(train_dataset, sort_y=False)
-        val_dataset = sort_graphs(val_dataset, sort_y=False)
-        test_dataset = sort_graphs(test_dataset, sort_y=False)
+        # Canonical order: the feature lexsort by default, or a nauty canonical labelling
+        # (`canonical: true`). ZINC's single atom-type column ties most nodes, so the lexsort leaves
+        # the gate a zero rank gap on 53% of edges; nauty individualizes those ties while seeding
+        # from the same feature rows, so the order still groups nodes by atom type. It permutes the
+        # nodes like sort_graphs, so nothing downstream changes shape, and the DGN field below is
+        # still computed AFTER the permutation.
+        # CONSTRAINT: `canonical` requires LDNA's rank_mode='position' (as on ogbg-code2 and
+        # EXP/CEXP). The nauty order keeps equal feature rows contiguous and ascending, so a
+        # feature-mode rank on it reproduces the un-canonicalized rank EXACTLY — the treatment
+        # would silently do nothing rather than fail.
+        order_graphs = canonicalize_graphs if canonical else sort_graphs
+        train_dataset = order_graphs(train_dataset, sort_y=False)
+        val_dataset = order_graphs(val_dataset, sort_y=False)
+        test_dataset = order_graphs(test_dataset, sort_y=False)
 
         # Optional 1-WL-refined canonical rank (wl_steps > 0): ZINC's single atom-type column ties
         # most nodes, so the runtime feature rank collapses to a zero gap on most edges. The
