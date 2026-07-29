@@ -221,9 +221,11 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > field: the molecular backbone recovered by the low-frequency Laplacian eigenvector, and the
 > AST's exact root-to-leaf depth. Elsewhere the field is fragmented (molhiv, 7.5% disconnected
 > → 4th), collapses a 2-D layout onto one axis (MNIST → 3rd, tied LDNA), or is one axis shared
-> across 128 tasks (molpcba, mid-pack), and DGN reduces to a costlier PNA. The edge is bought
-> with a hand-supplied per-dataset directional prior; LDNA is top-2 on all five without one.
-> Paper-draft phrasing: `docs/dgn_specialization.md`.
+> across 128 tasks (molpcba 3rd), and DGN reduces to a costlier PNA. The edge is bought with a
+> hand-supplied per-dataset directional prior. **Adding DGN drops LDNA out of top-2 on ZINC**:
+> ZINC now reads DGN 0.0507 / PNA 0.0807 / LDNA 0.0856 (LDNA 3rd). LDNA stays top-2 on the other
+> four (molhiv 1st, code2 2nd, mnist 2nd, molpcba 2nd). Paper-draft phrasing:
+> `docs/dgn_specialization.md`.
 
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
