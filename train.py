@@ -28,6 +28,29 @@ def _nrank_kwargs(batch):
     return {'nrank': batch.nrank} if hasattr(batch, 'nrank') else {}
 
 
+def _reset_encoders(model):
+    # Every model's `reset_parameters()` re-initializes its conv stack, norms, readout and head but
+    # NOT the node/edge encoders (`models/encoder.py: Encoder` does not even define the method), so
+    # a multi-run job would warm-start each run from the previous run's TRAINED encoder and the runs
+    # would not be independent. Re-initializing them here, in the caller, applies the same treatment
+    # to LDNA and every baseline without touching a model file. Modules are walked by name so the
+    # encoders are found through a wrapper too (`Code2Head` holds them on `.backbone`).
+    def reset(module):
+        # A module that defines `reset_parameters` owns its whole subtree's initialization, so the
+        # walk stops there. Descending past it would overwrite that choice with each child's own
+        # default -- `Encoder`'s Xavier replaced by `nn.Embedding`'s N(0, 1), a 12x rescale of the
+        # model's input at ZINC's width.
+        if hasattr(module, 'reset_parameters'):
+            module.reset_parameters()
+            return
+        for child in module.children():
+            reset(child)
+
+    for name, module in model.named_modules():
+        if name.endswith(('node_encoder', 'edge_encoder')):
+            reset(module)
+
+
 def _split_mask(batch, loader):
     # Node-level loaders tag themselves with the name of the boolean node mask their split uses
     # (train_mask / val_mask / test_mask), so the transductive case is the same `for batch in
@@ -104,6 +127,7 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
             train_loader, val_loader, test_loader = cv_folds[run]
         start_time = time.time()
         model.reset_parameters()
+        _reset_encoders(model)
 
         optimizer_kwargs = train_args['optimizer_kwargs'] if 'optimizer_kwargs' in train_args else {}
         optimizer = optimizer_resolver(train_args['optimizer'], model.parameters(), **optimizer_kwargs)
@@ -200,6 +224,7 @@ def _train_code2(model, train_loader, val_loader, test_loader, train_args, devic
     for run in range(train_args['runs']):
         start_time = time.time()
         model.reset_parameters()
+        _reset_encoders(model)
 
         optimizer_kwargs = train_args['optimizer_kwargs'] if 'optimizer_kwargs' in train_args else {}
         optimizer = optimizer_resolver(train_args['optimizer'], model.parameters(), **optimizer_kwargs)
