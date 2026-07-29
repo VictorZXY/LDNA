@@ -479,6 +479,36 @@ notes). Node-level search still has to be added, and lands with the node-level p
   applied identically to every model on every dataset, which is what § Objective's
   relative-ranking criterion rests on. Do not re-derive committed results under another
   convention and do not re-open this.
+- **Node-level training regime: constant learning rate, no LR schedule.** Full-graph
+  transductive training runs **one optimizer step per epoch**, where a graph-level epoch runs
+  130–680, so an epoch-counted schedule shared across the two levels means two different things.
+  Inherited unchanged, `ReduceLROnPlateau` at PyTorch's defaults (`factor=0.1`, `patience=10`)
+  collapses the LR from 1e-3 to 1e-7 in ~44 steps and training dies before it starts — measured,
+  and it produced a Questions run at 0.59 ROC-AUC, *below* the graph-agnostic ResNet baseline
+  (70.34) in the dataset's own paper. Node configs therefore **omit** `scheduler` (they must omit
+  it, not set `scheduler: null` — configargparse delivers a YAML null as the string `'None'`, the
+  same trap `readout` carries; `train.py: _lr_scheduler` rejects that string rather than honouring
+  it by accident). This matches what the reference full-graph implementations actually do, verified
+  by reading their source: OGB's `examples/nodeproppred/` has no scheduler anywhere; tunedGNN has
+  none; DGL's arxiv GAT warms up then holds constant; and Platonov et al. construct a `LambdaLR`
+  whose multiplier is identically 1 at the default `warmup_proportion=0`. Since the baselines'
+  published numbers were produced in that regime, matching it is what makes comparison to them
+  meaningful — and it removes a shared knob rather than adding three. Disclosed trade-off: a fixed
+  constant LR is not per-model-neutral, but neither is a plateau scheduler, which fires on
+  whichever model plateaus first and penalizes slow starters invisibly; genuine per-model
+  adaptivity would require per-model LR tuning, which § Tuning methodology forbids.
+  - Reference protocols, for the record: **Platonov et al.** (`Questions`' own paper) — AdamW,
+    lr 3e-5, weight decay 0, **1000 steps**, no schedule, no early stopping, 10 runs one per
+    official split, 225 reproduction invocations with zero hyperparameter overrides.
+    **OGB `ogbn-arxiv`** — Adam, lr 0.01, weight decay 0, 500 epochs, no scheduler, hidden 256,
+    3 layers, dropout 0.5, BatchNorm. **tunedGNN** — Questions 1500 epochs, arxiv 2000.
+  - Sanity anchors (what "training works" looks like): **Questions** test ROC-AUC **76–79**
+    (Platonov Table 4: GCN 76.09, SAGE 76.44, GAT 77.43, best FSGNN 78.86); **ogbn-arxiv**
+    full-graph test accuracy **71.5–73.6%** (OGB leaderboard GCN 71.74; tunedGNN re-tuned
+    GCN\* 73.60). Sources: https://arxiv.org/abs/2302.11640 ·
+    https://github.com/yandex-research/heterophilous-graphs ·
+    https://github.com/snap-stanford/ogb/blob/master/examples/nodeproppred/arxiv/gnn.py ·
+    https://github.com/LUOyk1999/tunedGNN · https://ogb.stanford.edu/docs/leader_nodeprop/
 - **Node-level & expressiveness** need their own evaluation paths (single-graph
   transductive accuracy; BREC's pairwise protocol). Define when implementing.
 - "Non-trivial margin": SEM-based; defined in § Objective.

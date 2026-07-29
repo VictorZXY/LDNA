@@ -60,6 +60,29 @@ def _reset_encoders(model):
             reset(module)
 
 
+def _lr_scheduler(train_args, optimizer):
+    # The LR schedule is optional, because full-graph node-level training runs ONE optimizer step
+    # per epoch while a graph-level epoch runs hundreds: an epoch-counted schedule shared between
+    # them means two different things, and `ReduceLROnPlateau(patience=10)` -- ten steps at node
+    # level -- collapses the LR before training starts. The reference full-graph implementations
+    # (OGB's node examples, Platonov et al., tunedGNN) hold the LR constant for a fixed step budget
+    # instead, so a node config simply OMITS `scheduler` and gets that.
+    #
+    # The key must be absent, not `scheduler: null`: configargparse stringifies the nested
+    # `train_args` mapping and PyYAML's null resolver does not match `None`, so a YAML null arrives
+    # here as the STRING 'None' -- the same trap `readout` carries in utils/resolver.py. That
+    # string would resolve to no scheduler by accident rather than by intent, so it is rejected.
+    query = train_args.get('scheduler')
+    if query == 'None':
+        raise ValueError("To train without an LR schedule, OMIT `scheduler` from train_args; a "
+                         "YAML `scheduler: null` reaches this point as the string 'None'")
+    if not query:
+        return None
+
+    scheduler_kwargs = train_args['scheduler_kwargs'] if 'scheduler_kwargs' in train_args else {}
+    return lr_scheduler_resolver(query, optimizer, **scheduler_kwargs)
+
+
 def _split_mask(batch, loader):
     # Node-level loaders tag themselves with the name of the boolean node mask their split uses
     # (train_mask / val_mask / test_mask), so the transductive case is the same `for batch in
@@ -140,8 +163,7 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
 
         optimizer_kwargs = train_args['optimizer_kwargs'] if 'optimizer_kwargs' in train_args else {}
         optimizer = optimizer_resolver(train_args['optimizer'], model.parameters(), **optimizer_kwargs)
-        scheduler_kwargs = train_args['scheduler_kwargs'] if 'scheduler_kwargs' in train_args else {}
-        scheduler = lr_scheduler_resolver(train_args['scheduler'], optimizer, **scheduler_kwargs)
+        scheduler = _lr_scheduler(train_args, optimizer)
 
         for epoch in range(train_args['epochs']):
             model.train()
@@ -176,7 +198,8 @@ def train(model, train_loader, val_loader, test_loader, train_args, device):
             logger.add_result(run, train_result_dict[eval_metric],
                               val_result_dict[eval_metric],
                               test_result_dict[eval_metric])
-            scheduler.step(val_result_dict[eval_metric])
+            if scheduler is not None:
+                scheduler.step(val_result_dict[eval_metric])
 
             if (epoch + 1) % train_args['eval_interval'] == 0:
                 print(f"Run {(run + 1):02d}, "
@@ -237,8 +260,7 @@ def _train_code2(model, train_loader, val_loader, test_loader, train_args, devic
 
         optimizer_kwargs = train_args['optimizer_kwargs'] if 'optimizer_kwargs' in train_args else {}
         optimizer = optimizer_resolver(train_args['optimizer'], model.parameters(), **optimizer_kwargs)
-        scheduler_kwargs = train_args['scheduler_kwargs'] if 'scheduler_kwargs' in train_args else {}
-        scheduler = lr_scheduler_resolver(train_args['scheduler'], optimizer, **scheduler_kwargs)
+        scheduler = _lr_scheduler(train_args, optimizer)
 
         for epoch in range(train_args['epochs']):
             model.train()
@@ -261,7 +283,8 @@ def _train_code2(model, train_loader, val_loader, test_loader, train_args, devic
             logger.add_result(run, train_result_dict[eval_metric],
                               val_result_dict[eval_metric],
                               test_result_dict[eval_metric])
-            scheduler.step(val_result_dict[eval_metric])
+            if scheduler is not None:
+                scheduler.step(val_result_dict[eval_metric])
 
             if (epoch + 1) % train_args['eval_interval'] == 0:
                 print(f"Run {(run + 1):02d}, "

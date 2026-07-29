@@ -1,0 +1,19 @@
+Device: cuda:3
+Dataset name: ZINC
+Model name: LDNA
+# Params: 2018562
+Run 01, Epoch   1/  2, Train loss: 0.8125, Val loss: 0.8594, Train mae: 0.8142, Val mae: 0.8593, Test mae: 0.8482
+Run 01, Epoch   2/  2, Train loss: 0.6826, Val loss: 0.6965, Train mae: 0.6838, Val mae: 0.6958, Test mae: 0.7189
+Run 01: Best train mae: 0.6838, Best val mae: 0.6958, Best test mae: 0.7189
+Finished Training LDNA on ZINC dataset
+All runs:
+/home/xz9118/Projects/LDNA/utils/logger.py:63: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1858.)
+  print(f"Best train {self.eval_metric}: {best_train.mean():.4f} ± {best_train.std():.4f}")
+Best train mae: 0.6838 ± nan
+/home/xz9118/Projects/LDNA/utils/logger.py:65: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1858.)
+  print(f"Best val {self.eval_metric}: {best_val.mean():.4f} ± {best_val.std():.4f}")
+Best val mae: 0.6958 ± nan
+/home/xz9118/Projects/LDNA/utils/logger.py:67: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at /pytorch/aten/src/ATen/native/ReduceOps.cpp:1858.)
+  print(f"Best test {self.eval_metric}: {best_test.mean():.4f} ± {best_test.std():.4f}")
+Best test mae: 0.7189 ± nan
+Average run time: 20.628 seconds
