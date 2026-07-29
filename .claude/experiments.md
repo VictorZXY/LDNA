@@ -473,6 +473,12 @@ notes). Node-level search still has to be added, and lands with the node-level p
 - **Final ranking:** `train.py` runs `train_args['runs']` independent runs and reports
   per-run best train/val/test via `utils/logger.py` (mean ± std). Rank LDNA vs. all
   baselines using the mean test metric (respecting each metric's direction).
+- **The reported metric is `utils/logger.py`'s `best_test` — the best test value over
+  epochs**, not test at the best-validation epoch (that variant is present but commented
+  out). Settled policy (user, 2026-07-29); **node-level reports the same way**. It is
+  applied identically to every model on every dataset, which is what § Objective's
+  relative-ranking criterion rests on. Do not re-derive committed results under another
+  convention and do not re-open this.
 - **Node-level & expressiveness** need their own evaluation paths (single-graph
   transductive accuracy; BREC's pairwise protocol). Define when implementing.
 - "Non-trivial margin": SEM-based; defined in § Objective.
@@ -715,12 +721,11 @@ pre-committed here rather than left to be read off the configs.
 - **Dataset: `Questions`, not Cora.** Cora is a smoke test whose accuracy is not a criterion; and
   a 2,708-node graph's run-to-run spread makes every comparison a tie. Questions ships 10 official
   splits, which give 10 paired runs for free.
-- **Deciding metric, pre-committed.** Test ROC-AUC **at the best-validation epoch** (not the
-  logger's printed `best_test`, which is a max over epochs — see § Evaluation protocol), compared
-  **paired by split**: the two arms share folds and initial weights, so the paired per-fold
-  difference is the right statistic and is far tighter than an unpaired mean ± std. Decision rule:
-  the gate is judged to contribute if the mean paired difference exceeds the SEM of that paired
-  difference over the 10 splits.
+- **Deciding metric, pre-committed.** The reported test ROC-AUC — the logger's `best_test`, this
+  project's standard (§ Evaluation protocol) — compared **paired by split**: the two arms share
+  folds and initial weights, so the paired per-fold difference is the right statistic and is far
+  tighter than an unpaired mean ± std. Decision rule: the gate is judged to contribute if the mean
+  paired difference exceeds the SEM of that paired difference over the 10 splits.
 - **Stop condition (from the node-level plan).** If the arms are within SEM, stop and report
   before spending Phase 2 tuning/ranking compute — the mechanism would be contributing nothing at
   node level, which is a finding about the method, not a bug to fix.
