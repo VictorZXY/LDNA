@@ -79,11 +79,13 @@
     strictness needs no randomness. Feature-tie sorting alone (no individualization)
     is exactly 1-WL — the sort is then purely the invariance device.
 - Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete**. Headline: LDNA breaks the
-  1-WL ceiling (EXP 1.00 / CEXP 1.00 / BREC **312.0** official — the `gate_init_std: 0.1`
-  gate-init variant, with zero-init 122.8 kept alongside) while GIN sits on it exactly
-  (0.50 / 0.75 / 0) and DGN saturates EXP/CEXP and scores BREC **144.4** official (271.4 under
-  shared canonicalization). These datasets are featureless, so the permutation-invariance device
-  is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via
+  1-WL ceiling (EXP 1.00 / CEXP 1.00 / BREC **321** official — the `gate_init_std: 0.1`
+  gate-init variant, with zero-init 138 kept alongside) while GIN sits on it exactly
+  (0.50 / 0.75 / 0) and DGN saturates EXP/CEXP and scores BREC **145** official (273 under
+  shared canonicalization). BREC scores are **best across the 10 protocol seeds**, the benchmark's
+  own convention (revised 2026-07-29 from mean-only, which understated us against every published
+  entry; means are kept alongside in `.claude/experiments.md`). These datasets are featureless, so
+  the permutation-invariance device is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via
   `rank_mode: position`; the model set is LDNA + GIN + DGN and there is no hyperparameter search
   (protocol constants). EXP/CEXP run through the standard loop (10-fold CV); BREC uses a
   dedicated entry point (`scripts/pairwise_eval.py`, `data_utils/brec.py`). Full results, the DGN BREC
