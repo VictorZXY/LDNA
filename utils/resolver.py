@@ -12,7 +12,7 @@ from torch_geometric.datasets import HeterophilousGraphDataset, MNISTSuperpixels
 from torch_geometric.loader import DataLoader
 
 import models
-from data_utils import add_eig_vecs, add_node_ranks, canonicalize_graphs, degree_histogram, node_rank, sort_graphs
+from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, node_rank, sort_graphs
 from data_utils.code2 import encode_y_to_arr, get_vocab_mapping
 from data_utils.exp import PlanarSATPairsDataset
 from data_utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
@@ -134,43 +134,13 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     elif dataset_query == 'ZINC':
         transform = UnsqueezeTargetDim()
         subset = dataset_kwargs.pop('subset', False)
-        wl_steps = dataset_kwargs.pop('wl_steps', 0)
-        canonical = dataset_kwargs.pop('canonical', False)
         train_dataset = ZINC(subset=subset, split='train', pre_transform=transform, **dataset_kwargs)
         val_dataset = ZINC(subset=subset, split='val', pre_transform=transform, **dataset_kwargs)
         test_dataset = ZINC(subset=subset, split='test', pre_transform=transform, **dataset_kwargs)
 
-        # Canonical order: the feature lexsort by default, or a nauty canonical labelling
-        # (`canonical: true`). ZINC's single atom-type column ties most nodes, so the lexsort leaves
-        # the gate a zero rank gap on 53% of edges; nauty individualizes those ties while seeding
-        # from the same feature rows, so the order still groups nodes by atom type. It permutes the
-        # nodes like sort_graphs, so nothing downstream changes shape, and the DGN field below is
-        # still computed AFTER the permutation.
-        # CONSTRAINT: `canonical` requires LDNA's rank_mode='position' (as on ogbg-code2 and
-        # EXP/CEXP). The nauty order keeps equal feature rows contiguous and ascending, so a
-        # feature-mode rank on it reproduces the un-canonicalized rank EXACTLY (measured: identical
-        # P(delta=0) and identical rank values) — the treatment would silently do nothing and the
-        # run would report a null result while having trained the untreated arm. Rejected here for
-        # the same reason the readout guard exists: the failure is invisible in the output.
-        if canonical and model_query == 'LDNA' and model_kwargs.get('rank_mode') != 'position':
-            raise ValueError("Argument `rank_mode` must be 'position' when `canonical` is set: the "
-                             "nauty order keeps equal feature rows contiguous, so a feature-tie "
-                             "rank on it silently reproduces the un-canonicalized rank")
-        order_graphs = canonicalize_graphs if canonical else sort_graphs
-        train_dataset = order_graphs(train_dataset, sort_y=False)
-        val_dataset = order_graphs(val_dataset, sort_y=False)
-        test_dataset = order_graphs(test_dataset, sort_y=False)
-
-        # Optional 1-WL-refined canonical rank (wl_steps > 0): ZINC's single atom-type column ties
-        # most nodes, so the runtime feature rank collapses to a zero gap on most edges. The
-        # refined rank is precomputed per graph and, as with DGN's `eig_vec` below, attached only
-        # for LDNA (the only model that reads `nrank`) — its presence on the batch is what routes
-        # it into the forward, bypassing the runtime _canonical_rank. Attached AFTER the canonical
-        # sort, which permutes the nodes without realigning any extra per-node attribute.
-        if wl_steps > 0 and model_query == 'LDNA':
-            train_dataset = add_node_ranks(train_dataset, wl_steps=wl_steps)
-            val_dataset = add_node_ranks(val_dataset, wl_steps=wl_steps)
-            test_dataset = add_node_ranks(test_dataset, wl_steps=wl_steps)
+        train_dataset = sort_graphs(train_dataset, sort_y=False)
+        val_dataset = sort_graphs(val_dataset, sort_y=False)
+        test_dataset = sort_graphs(test_dataset, sort_y=False)
 
         if model_query == 'DGN':
             num_eig_vec = model_kwargs.get('num_eig_vec', 1)

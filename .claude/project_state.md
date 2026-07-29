@@ -89,25 +89,6 @@
   **35.58 GiB at h=256/L=3** — ≈6.1 GiB per layer at h=128, scaling linearly in both, which is
   what bounds the `(hidden_channels, num_layers)` box of the node-level search on a 49 GB card.
   The sampled control is still to come.
-- Tested and **rejected on the evidence** (2026-07-29; A/B in `.claude/experiments.md` § Results
-  log): a 1-WL-refined canonical rank for ZINC, whose
-  single atom-type column ties the feature rank on 53% of train edges (gate sees δ = 0 there).
-  `node_rank` / `add_node_ranks` gained `wl_steps` (default 0 = exact prior behavior):
-  `data_utils/preprocess.py: _wl_refine` refines the feature-tie partition by 1-WL color
-  refinement over (own color, sorted multiset of (neighbor color, bond label)), assigning new
-  colors by lexicographic signature sort — canonical, hence permutation-invariant; 1-WL-equivalent
-  nodes stay tied. The resolver's ZINC branch pops `data_args.wl_steps` and attaches per-graph
-  `nrank` for LDNA only (presence-routing, as with DGN's `eig_vec`), riding the existing
-  `_nrank_kwargs` path that bypasses the runtime `_canonical_rank`. Measured P(δ=0) on
-  ZINC-subset train: 0.530 (k=0) → 0.141 → 0.041 → 0.0085 (k=3, chosen) → 0.0048 stable floor
-  (genuinely 1-WL-equivalent adjacent pairs). The A/B (`configs/ldna_zinc_subset.yaml` control vs
-  `configs/ldna_zinc_subset_wl.yaml`, one run each on the 12k subset) came out **negative**: the
-  refinement removes the ties it targets and the gate reacts to them, but test MAE is 0.3353 vs
-  the control's 0.3305 — no gain, because ZINC's unrefined δ is a *chemical* signal that the
-  refinement destroys (δ = 0 ⟺ bonded atoms share an element, exactly) and a k-step WL colour is
-  what k rounds of message passing already derive. Measurements and the full reasoning are in the
-  results-log row. The code stays (`wl_steps` defaults to 0, a provable no-op) so the negative is
-  reproducible; full ZINC was not re-run.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
   so runs are independent for LDNA and every baseline alike, applied in the caller with no
