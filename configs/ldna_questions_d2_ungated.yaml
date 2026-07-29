@@ -1,0 +1,47 @@
+experiment_name: ldna_questions_d2_ungated
+
+# DIAGNOSTIC D2 (gate ablation), UNGATED arm -- hand-picked config, NOT tuned, NOT a reported
+# result. Identical to its twin ldna_questions_d2.yaml except `rank_mode: none`, which keeps the
+# gate module built but never engaged, so every LDNAConv is a plain sum-of-messages aggregator;
+# the gap to the gated arm measures what the gate contributes at node level. runs=10 maps one run
+# to each of Questions' 10 official split columns (the resolver rides the per-split loader triples
+# on the train_loader as cv_folds).
+#
+# No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse
+# stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
+model: LDNA
+model_args:
+  hidden_channels: 128
+  out_channels: 128
+  num_layers: 3
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.5
+  residual: true
+  rank_mode: none
+
+# Dataset specific arguments/hyperparameters
+dataset: Questions
+data_args:
+  root: data/questions/
+
+# Training specific arguments/hyperparameters
+cuda: 0
+mem_fraction: 0.85
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 5.0e-4
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: ROCAUCEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

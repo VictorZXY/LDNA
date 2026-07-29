@@ -62,9 +62,9 @@ exists but not tuned/run; `todo` = not implemented.
 ### 2. Node-level prediction
 
 The node-level **pipeline is implemented** (transductive masked training loop, per-node head
-via `readout=None`, precomputed canonical rank); of the datasets below **none is wired yet** —
-only the unreported `Planetoid` Cora smoke test is. Sampling and layer-wise inference are still
-to come. Loaders are from `torch_geometric.datasets` / `ogb.nodeproppred`.
+via `readout=None`, precomputed canonical rank); of the datasets below only `Questions` is
+wired (diagnostics only, no reported runs), plus the unreported `Planetoid` Cora smoke test.
+Sampling and layer-wise inference are still to come. Loaders are from `torch_geometric.datasets` / `ogb.nodeproppred`.
 
 Five reported datasets, matching the graph-level count, listed in **priority order** (cut
 the last one first if the budget shrinks). Sizes below are from the PyG/OGB metadata.
@@ -73,7 +73,7 @@ the last one first if the budget shrinks). Sizes below are from the PyG/OGB meta
 |---|---|---|---|---|---|---|
 | `ogbn-arxiv` | 40-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 169k nodes / 1.17M edges; OGB **time** split (train ≤2017 / val 2018 / test 2019); the only dataset runnable **both** full-graph and sampled — hence the sampling control (see notes) |
 | `ogbn-products` | 47-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 2.45M nodes / 61.9M edges; OGB `sales_ranking` split; neighbor sampling required. The scale anchor |
-| `Questions` (`HeterophilousGraphDataset`) | binary node classification | ROC-AUC | max | custom (ROC-AUC) | todo | 48.9k nodes / 154k edges / 301 features; **heterophilous** — the one non-homophilous entry; ships 10 official split masks (`train_mask` is `[N, 10]`), so splits map to `runs` the way EXP folds do |
+| `Questions` (`HeterophilousGraphDataset`) | binary node classification | ROC-AUC | max | `ROCAUCEvaluator` | wired | 48.9k nodes / 154k edges / 301 features; **heterophilous** — the one non-homophilous entry; ships 10 official split masks (`train_mask` is `[N, 10]`), so splits map to `runs` the way EXP folds do (per-split shallow `Data` copies share x/edge_index/y/nrank; the fold list rides the train_loader as `cv_folds`); single BCE logit (`num_pred_heads=1`, float `[N, 1]` y). Wired for the D2 gate ablation (`configs/ldna_questions_d2*.yaml`); no reported runs yet |
 | `PPI` | 121-task multi-label | micro-F1 | max | custom (micro-F1) | todo | 24 graphs (20 train / 2 val / 2 test), ~2.2k nodes each; **inductive** and multi-graph, so it reuses the existing `DataLoader` path — only the head changes (no pooling). Carries the multi-label axis `ogbn-proteins` was to provide |
 | `Reddit` | 41-class node classification | accuracy | max | `AccuracyEvaluator` | todo | 233k nodes / **114.6M** edges (mean degree ~492) — the density stress case for `LDNAConv`'s edge-level MLP; neighbor sampling required. Weakest citability (only NAGphormer reports it, on a non-standard 60/20/20 split), so it buys the O(E)-at-scale claim rather than a comparison |
 
@@ -566,7 +566,11 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 - [x] `Planetoid` Cora — smoke test for the node path only; not reported.
 - [ ] Add `ogbn-arxiv` (OGB split + evaluator; full-graph run plus the sampled control).
 - [ ] Add `ogbn-products` (neighbor sampling; OGB evaluator).
-- [ ] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator).
+- [x] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator) —
+      wired 2026-07-29 together with `rank_mode: none` (ungated LDNA: the gate module exists but
+      never engages) and the hand-picked, untuned D2 gate-ablation config pair
+      `configs/ldna_questions_d2.yaml` / `ldna_questions_d2_ungated.yaml` (identical arms except
+      the gate; 10 runs = the 10 official splits). The A/B itself is not run yet.
 - [ ] Add `PPI` (inductive multi-graph; multi-label micro-F1 evaluator).
 - [ ] Add `Reddit` (neighbor sampling; density stress case).
 

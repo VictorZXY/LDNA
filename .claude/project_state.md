@@ -72,7 +72,14 @@
   model file was touched — their readout chains are `if`/`elif` with no `else`, so `readout=None`
   already yields per-node output. Evaluators added: `OGBNodeEvaluator`, `ROCAUCEvaluator`,
   `MicroF1Evaluator`; `AccuracyEvaluator` gained a `.view(-1)` fixing an `[N]`-vs-`[N,1]`
-  broadcast. Only `Cora` is wired so far (`configs/ldna_cora.yaml`), as an unreported smoke test.
+  broadcast. Wired so far: `Cora` (`configs/ldna_cora.yaml`, an unreported smoke test) and
+  `Questions` (heterophilous, binary ROC-AUC on a single BCE logit; its 10 official `[N, 10]`
+  split-mask columns become 10 per-split shallow `Data` copies sharing x/edge_index/y/nrank,
+  riding the train_loader as `cv_folds` the way the EXP/CEXP folds do). `rank_mode: none` is the
+  ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
+  sum-of-messages aggregator), paired with the hand-picked, untuned D2 gate-ablation configs
+  `ldna_questions_d2.yaml` / `ldna_questions_d2_ungated.yaml` (identical except the gate; not
+  run yet).
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run.
   Model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders
   (`models/encoder.py: Encoder` defines no such method), so before this every run after the first
@@ -144,9 +151,9 @@
 
 ## Partial or missing components
 - `README.md` is a title stub; it does not explain the project or its setup/usage.
-- Node-level support covers only the full-graph transductive case on `Cora`. Sampling
-  (GraphSAINT), layer-wise exact inference, the remaining datasets (ogbn-arxiv, Questions, PPI,
-  ogbn-products), and the tune → broadcast → rank protocol are not implemented yet.
+- Node-level support covers only the full-graph transductive case on `Cora` and `Questions`.
+  Sampling (GraphSAINT), layer-wise exact inference, the remaining datasets (ogbn-arxiv, PPI,
+  ogbn-products, Reddit), and the tune → broadcast → rank protocol are not implemented yet.
 
 ---
 

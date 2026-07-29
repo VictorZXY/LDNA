@@ -1,3 +1,4 @@
+import copy
 import os
 
 import ogb.graphproppred
@@ -7,7 +8,7 @@ import torch_geometric.transforms as T
 from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from torch import nn
-from torch_geometric.datasets import MNISTSuperpixels, Planetoid, ZINC
+from torch_geometric.datasets import HeterophilousGraphDataset, MNISTSuperpixels, Planetoid, ZINC
 from torch_geometric.loader import DataLoader
 
 import models
@@ -21,7 +22,7 @@ from utils.evaluator import (AccuracyEvaluator, Code2Evaluator, MicroF1Evaluator
 # Datasets predicted per node rather than per graph. They take a different route through the
 # resolver — no canonical sort, no graph readout, one graph per "batch" — and the readout guard
 # below keys off this tuple to check that a config has not crossed the two levels.
-NODE_DATASETS = ('Cora',)
+NODE_DATASETS = ('Cora', 'Questions')
 
 # Every model's readout chain is an `if`/`elif` with no `else`, so an unrecognized value does not
 # raise: it silently skips pooling and the model returns one row per node. That is exactly the
@@ -194,16 +195,25 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         cv_folds = _planar_cv_folds(dataset, batch_size)
         train_dataset = cv_folds[0][0].dataset
     elif dataset_query in NODE_DATASETS:
-        # Transductive node classification: one graph, three boolean node masks, no splitting of the
+        # Transductive node classification: one graph, boolean node masks, no splitting of the
         # data itself. Deliberately NO sort_graphs — the tie-aware rank is permutation-equivariant,
         # so the model sees the same rank gaps whether or not the nodes are physically relabelled
         # (see data_utils.node_rank), and skipping the permutation keeps the masks and `y` aligned
         # with the nodes without an extra realignment pass.
-        dataset = Planetoid(name=dataset_query, **dataset_kwargs)
-        data = dataset[0]
+        if dataset_query == 'Questions':
+            dataset = HeterophilousGraphDataset(name=dataset_query, **dataset_kwargs)
+            data = dataset[0]
+            # Binary task scored on a single logit (BCEWithLogitsLoss + ROC-AUC), so the integer
+            # class vector becomes the float [N, 1] target that loss path expects; Cora's long
+            # class indices stay as-is for CrossEntropyLoss.
+            data.y = data.y.view(-1, 1).float()
+        else:
+            dataset = Planetoid(name=dataset_query, **dataset_kwargs)
+            data = dataset[0]
 
         # Only LDNA reads the canonical rank, so as with DGN's eigenvector field it is attached only
-        # for LDNA and its presence on the batch is what routes it into the forward.
+        # for LDNA and its presence on the batch is what routes it into the forward. Attached before
+        # the per-split copies built below, which all share it.
         if model_query == 'LDNA':
             data.nrank = node_rank(data)
 
@@ -219,11 +229,29 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         train_loader, val_loader, test_loader = cv_folds[0]
         train_loader.cv_folds = cv_folds
     elif dataset_query in NODE_DATASETS:
-        # All three loaders yield the same full graph and differ only in the split mask they tag,
-        # which is what transductive means here: every node is seen, only the scored ones change.
-        train_loader = FullGraphLoader(data, 'train_mask')
-        val_loader = FullGraphLoader(data, 'val_mask')
-        test_loader = FullGraphLoader(data, 'test_mask')
+        # All loaders yield the same full graph and differ only in the split mask they tag, which
+        # is what transductive means here: every node is seen, only the scored ones change.
+        # Questions ships its 10 official splits as [N, 10] mask matrices, mapped to runs the way
+        # the EXP/CEXP folds are: one loader triple per split column, fold 0 returned as the plain
+        # loaders and the full list riding on the train_loader. Each fold's `Data` is a SHALLOW
+        # copy — x/edge_index/y/nrank stay the same tensors and only the 1-D mask columns differ —
+        # so the 48.9k x 301 feature matrix is held once, not ten times.
+        if data.train_mask.dim() == 2:
+            cv_folds = []
+            for i in range(data.train_mask.size(1)):
+                fold_data = copy.copy(data)
+                fold_data.train_mask = data.train_mask[:, i]
+                fold_data.val_mask = data.val_mask[:, i]
+                fold_data.test_mask = data.test_mask[:, i]
+                cv_folds.append((FullGraphLoader(fold_data, 'train_mask'),
+                                 FullGraphLoader(fold_data, 'val_mask'),
+                                 FullGraphLoader(fold_data, 'test_mask')))
+            train_loader, val_loader, test_loader = cv_folds[0]
+            train_loader.cv_folds = cv_folds
+        else:
+            train_loader = FullGraphLoader(data, 'train_mask')
+            val_loader = FullGraphLoader(data, 'val_mask')
+            test_loader = FullGraphLoader(data, 'test_mask')
     else:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -282,10 +310,13 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # in a config arrives at the model as the STRING 'None' — which matches no branch of the
         # readout chain and would therefore look correct while being an accident. Setting it here
         # makes per-node output the resolver's decision, checked by the guard below.
+        # Questions is binary and scored by ROC-AUC on a single logit (BCEWithLogitsLoss), so its
+        # head is one output wide — `dataset.num_classes` (2) would build a two-logit CE head that
+        # neither the loss nor the evaluator expects.
         model_kwargs.update({
             'in_channels': embedding_dim,
             'node_encoder': nn.Linear(dataset.num_features, embedding_dim),
-            'num_pred_heads': dataset.num_classes,
+            'num_pred_heads': 1 if dataset_query == 'Questions' else dataset.num_classes,
             'readout': None
         })
 
