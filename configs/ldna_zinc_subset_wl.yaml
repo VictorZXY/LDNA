@@ -1,0 +1,49 @@
+# A/B treatment arm: does a 1-WL-refined canonical rank help where feature ties collapse the gate's
+# delta? Identical to ldna_zinc_subset except data_args.wl_steps, which refines the feature-tie
+# rank by 1-WL color refinement (data-side, permutation-invariant; data_utils._wl_refine); single
+# run, because the subset has no committed baseline number. wl_steps: 3 chosen from the measured
+# P(delta=0) over all ZINC-subset train edges (498558 edges), the smallest k at the plateau:
+#   wl_steps:   0        1        2        3        4        5        stable
+#   P(delta=0): 0.5301   0.1414   0.0408   0.0085   0.0057   0.0049   0.0048
+# The 0.48% floor is genuinely 1-WL-equivalent adjacent pairs, which must stay tied.
+experiment_name: ldna_zinc_subset_wl
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 7
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.144427
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ZINC
+data_args:
+  root: data/zinc/
+  subset: true
+  wl_steps: 3
+  batch_size: 128
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 1
+  epochs: 150
+  eval_interval: 10
+  loss_fn: L1Loss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000118959
+    weight_decay: 2.22642e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: min
+  evaluator: ZINCEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

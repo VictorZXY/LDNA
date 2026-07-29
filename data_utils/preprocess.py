@@ -108,7 +108,76 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False):
     return dataset
 
 
-def node_rank(graph: Data, rank_mode='feature'):
+def _wl_refine(graph: Data, colors, num_steps):
+    # 1-WL color refinement of an initial integer node coloring, in original node order. Each step
+    # replaces a node's color with an id of its signature: (own color, degree, the sorted multiset
+    # of (neighbor color, edge label) over its incident edges), where the edge label is the
+    # edge_attr row when the graph carries edge features (ZINC bond types) and omitted otherwise.
+    # Because the signature contains the previous color, each step refines (never coarsens) the
+    # input partition, so the final colors are themselves a refined dense rank of the initial one.
+    #
+    # New ids are assigned by LEXICOGRAPHIC SORT of the distinct signatures — a canonical
+    # relabelling that depends only on signature content, never on hash values or first-appearance
+    # order, which is what keeps the refinement permutation-invariant: nodes that remain
+    # 1-WL-equivalent share a color at every step. Aggregation runs over incoming edges, the same
+    # direction LDNAConv aggregates messages, which on the undirected (both-direction) datasets
+    # used here is exactly the incident-edge multiset.
+    n = graph.num_nodes
+    src, dst = graph.edge_index.numpy()
+    num_edges = src.shape[0]
+    labels = graph.edge_attr.view(num_edges, -1).numpy() if graph.edge_attr is not None \
+        else np.empty((num_edges, 0), dtype=np.int64)
+    label_dim = labels.shape[1]
+
+    # Signatures are laid out as fixed-width rows [own color, degree, pair_1, ..., pair_maxdeg],
+    # padding unused pair slots with a sentinel so np.lexsort can order variable-length multisets.
+    # The degree column already separates signatures of different length, so the sentinel value can
+    # never conflate two distinct signatures.
+    deg = np.bincount(dst, minlength=n)
+    max_deg = int(deg.max()) if num_edges > 0 else 0
+    ptr = np.zeros(n + 1, dtype=np.int64)
+    np.cumsum(deg, out=ptr[1:])
+    sig_dtype = np.result_type(np.int64, labels.dtype)
+
+    num_colors = int(colors.max()) + 1
+    for _ in range(num_steps):
+        if num_colors == n:  # discrete partition: nothing left to refine
+            break
+
+        # Group the edges by destination and sort each group by (neighbor color, edge label), so
+        # every node's pair slots hold its sorted multiset. Ties within a group are content-equal
+        # pairs, so how the sort breaks them cannot affect the signature.
+        order = np.lexsort([labels[:, j] for j in reversed(range(label_dim))] + [colors[src], dst])
+        slot = np.arange(num_edges) - ptr[dst[order]]
+
+        sig = np.full((n, 2 + max_deg * (1 + label_dim)), -1, dtype=sig_dtype)
+        sig[:, 0] = colors
+        sig[:, 1] = deg
+        col = 2 + slot * (1 + label_dim)
+        sig[dst[order], col] = colors[src[order]]
+        for j in range(label_dim):
+            sig[dst[order], col + 1 + j] = labels[order, j]
+
+        # Dense-rank the signature rows in lexicographic order — the same "compare adjacent rows +
+        # cumsum" device as node_rank below, applied to signature rows instead of feature rows.
+        row_order = np.lexsort(sig.T[::-1])
+        sig = sig[row_order]
+        changed = np.zeros(n, dtype=np.int64)
+        changed[1:] = (sig[1:] != sig[:-1]).any(axis=1)
+        new_colors = np.empty(n, dtype=np.int64)
+        new_colors[row_order] = np.cumsum(changed)
+
+        # A step can only split color classes, so an unchanged class count means the partition is
+        # stable and further steps are no-ops.
+        new_num_colors = int(new_colors.max()) + 1
+        if new_num_colors == num_colors:
+            break
+        colors, num_colors = new_colors, new_num_colors
+
+    return colors
+
+
+def node_rank(graph: Data, rank_mode='feature', wl_steps=0):
     # Per-node canonical rank for node-level (transductive) data, returned as a float in [0, 1) of
     # shape [N, 1] — the same contract as LDNA._canonical_rank, which this reproduces for a single
     # graph. It is precomputed here and carried on the data because a node-level model sees the
@@ -148,17 +217,25 @@ def node_rank(graph: Data, rank_mode='feature'):
     nrank = torch.empty(n, dtype=torch.float)
     nrank[sorted_idx] = rank
 
+    # Optional 1-WL refinement of the tie structure (wl_steps > 0): on a dataset whose single
+    # feature column ties most nodes (ZINC atom types), most edges see a zero rank gap and the
+    # gate reads no signal there. Refining the feature partition by neighborhood structure
+    # recovers gaps between 1-WL-distinguishable nodes while keeping genuinely equivalent nodes
+    # tied, so the permutation invariance argument above carries over (see _wl_refine).
+    if wl_steps > 0:
+        nrank = torch.from_numpy(_wl_refine(graph, nrank.numpy().astype(np.int64), wl_steps)).float()
+
     return (nrank / n).unsqueeze(-1)
 
 
-def add_node_ranks(dataset: InMemoryDataset, rank_mode='feature'):
+def add_node_ranks(dataset: InMemoryDataset, rank_mode='feature', wl_steps=0):
     # Multi-graph node-level datasets (PPI): the rank is computed PER GRAPH, never once across the
     # collated store, since a rank shared across graphs would compare feature rows that no edge
     # connects. Follows add_eig_vecs' materialize -> mutate -> collate shape but keeps no disk
     # cache: a lexsort is cheaper to recompute than a cache key hashed over every feature row.
     all_graphs = [dataset.get(i) for i in range(len(dataset))]
     for graph in all_graphs:
-        graph.nrank = node_rank(graph, rank_mode)
+        graph.nrank = node_rank(graph, rank_mode, wl_steps)
 
     dataset.data, dataset.slices = dataset.collate(all_graphs)
     return dataset
