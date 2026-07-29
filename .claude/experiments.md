@@ -65,12 +65,51 @@ Node-level tasks are **not yet supported by the pipeline** (see § Implementatio
 queue, node-level infrastructure). Loaders are from `torch_geometric.datasets` /
 `ogb.nodeproppred`.
 
+Five reported datasets, matching the graph-level count, listed in **priority order** (cut
+the last one first if the budget shrinks). Sizes below are from the PyG/OGB metadata.
+
 | Dataset | Task | Metric | Dir | Evaluator | Status | Notes |
 |---|---|---|---|---|---|---|
-| `CitationFull` (Cora, PubMed only) | node classification | accuracy | max | custom (acc) | todo | transductive single graph; CitationFull has no standard split — define train/val/test masks |
-| `Reddit` | node classification | accuracy / micro-F1 | max | custom (acc) | todo | large graph (~232k nodes) — needs neighbor sampling |
-| `ogbn-products` | node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | large graph — needs neighbor sampling; OGB split |
-| `ogbn-proteins` | 112-task binary | ROC-AUC | max | `OGBNodePropPredEvaluator` | todo | no node features (aggregate edge features to nodes); species split |
+| `ogbn-arxiv` | 40-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 169k nodes / 1.17M edges; OGB **time** split (train ≤2017 / val 2018 / test 2019); the only dataset runnable **both** full-graph and sampled — hence the sampling control (see notes) |
+| `ogbn-products` | 47-class node classification | accuracy | max | `OGBNodePropPredEvaluator` | todo | 2.45M nodes / 61.9M edges; OGB `sales_ranking` split; neighbor sampling required. The scale anchor |
+| `Questions` (`HeterophilousGraphDataset`) | binary node classification | ROC-AUC | max | custom (ROC-AUC) | todo | 48.9k nodes / 154k edges / 301 features; **heterophilous** — the one non-homophilous entry; ships 10 official split masks (`train_mask` is `[N, 10]`), so splits map to `runs` the way EXP folds do |
+| `PPI` | 121-task multi-label | micro-F1 | max | custom (micro-F1) | todo | 24 graphs (20 train / 2 val / 2 test), ~2.2k nodes each; **inductive** and multi-graph, so it reuses the existing `DataLoader` path — only the head changes (no pooling). Carries the multi-label axis `ogbn-proteins` was to provide |
+| `Reddit` | 41-class node classification | accuracy | max | `AccuracyEvaluator` | todo | 233k nodes / **114.6M** edges (mean degree ~492) — the density stress case for `LDNAConv`'s edge-level MLP; neighbor sampling required. Weakest citability (only NAGphormer reports it, on a non-standard 60/20/20 split), so it buys the O(E)-at-scale claim rather than a comparison |
+
+> **`ogbn-proteins` removed from scope (2026-07-29), replaced by `ogbn-arxiv`.** proteins has no
+> node features, so the feature-based canonical sort cannot impose a permutation-invariant node
+> order — the exact reason `ogbg-ppa` was removed above, and the edge-feature-to-node aggregation
+> that would fix it is a bespoke rule not worth inventing twice. Its multi-label / ROC-AUC axis is
+> recovered by `PPI` (multi-label) and `Questions` (ROC-AUC).
+
+> **Suite design.** The five span scale (2.2k → 48.9k → 169k → 233k → 2.45M nodes), mean degree
+> (6 → 14 → 25 → 27 → 492), task type (3× multi-class accuracy, 1× binary ROC-AUC, 1× multi-label
+> micro-F1), structure (4 homophilous, 1 heterophilous), split semantics (time / sales-ranking /
+> 10 standard splits / by-graph inductive / post-time) and sampling regime (3 full-graph,
+> 2 sampled). Rejected for redundancy: a second heterophilous graph (Minesweeper, Tolokers),
+> `Yelp` (multi-label at scale — same axis as PPI at ~6x the compute; the swap to make if
+> multi-label-at-scale ever matters more than Reddit's density), `Flickr` and `LINKXDataset`
+> (occupy no axis of their own), `AmazonProducts` (same domain as ogbn-products, larger),
+> `ogbn-mag` (heterogeneous — needs infrastructure outside this pipeline).
+
+> **`Planetoid` Cora is a smoke test, not a reported dataset.** 2,708 nodes / 7 classes with the
+> standard public split — the cheapest correctness check for the node path, run during development
+> and left out of the results log. `CitationFull` is dropped entirely: its Cora is a *different*
+> dataset variant (19,793 nodes / 70 classes, not the 2,708/7 everyone reports) and it ships no
+> standard split, so numbers from it would be uncitable on both counts. Small classics are also a
+> poor fit for the § Objective SEM margin — their run-to-run spread makes every model a statistical
+> tie, contributing nothing to a ranking claim.
+
+> **Two constraints the node path must honour** (both load-bearing, decided before implementation).
+> (1) **The canonical rank is precomputed once on the full graph** and carried as a node attribute.
+> `LDNA._canonical_rank` / `_position_rank` currently derive the rank per batch and normalize by
+> graph size; on a `NeighborLoader` subgraph that would make a node's rank drift with the batch it
+> landed in *and* normalize by the wrong size. Precomputing keeps δ identical to the full-graph
+> value on every subgraph. (2) **Whether a dataset is sampled is a per-dataset decision shared by
+> every model**, with the fanout a shared knob (not searched) — the edge-MLP models (LDNA, PNA,
+> DGN, GINE) and the sparse-matmul models (GCN, SAGE) have very different memory profiles, so
+> letting the regime vary per model would break the shared-hyperparameter fairness premise.
+> `ogbn-arxiv` is run **both ways** to quantify what sampling costs.
 
 ### 3. Synthetic expressiveness
 
@@ -497,11 +536,14 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
 
 - [ ] **Node-level infrastructure**: resolver branches for node datasets; a node-mode
       LDNA/baseline path (no graph pooling — per-node prediction head); transductive
-      training loop with train/val/test masks; neighbor sampling for large graphs.
-- [ ] Add `CitationFull` (Cora, PubMed) — smallest node datasets; define splits.
-- [ ] Add `Reddit` (neighbor sampling).
+      training loop with train/val/test masks; neighbor sampling for large graphs;
+      full-graph precomputation of the canonical rank (§ Datasets → node-level notes).
+- [ ] `Planetoid` Cora — smoke test for the node path only; not reported.
+- [ ] Add `ogbn-arxiv` (OGB split + evaluator; full-graph run plus the sampled control).
 - [ ] Add `ogbn-products` (neighbor sampling; OGB evaluator).
-- [ ] Add `ogbn-proteins` (edge-feature aggregation to nodes; ROC-AUC).
+- [ ] Add `Questions` (heterophilous; 10 official splits map to runs; ROC-AUC evaluator).
+- [ ] Add `PPI` (inductive multi-graph; multi-label micro-F1 evaluator).
+- [ ] Add `Reddit` (neighbor sampling; density stress case).
 
 **Expressiveness (custom evaluation):**
 
