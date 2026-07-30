@@ -93,7 +93,7 @@
   what bounds the `(hidden_channels, num_layers)` box of the node-level search on a 49 GB card.
   The sampled control is still to come.
 - `Questions` has its baseline config set: ten `<model>_questions.yaml` files carrying LDNA's
-  tuned shared knobs from `configs/ldna_questions_h64l2.yaml` (h=64, L=2, dropout 0.616143,
+  tuned shared knobs from `configs/ldna_questions.yaml` (h=64, L=2, dropout 0.616143,
   lr 4.871103e-3, wd 5.3e-6), broadcast by `scripts/broadcast.py`, which learned the dataset via
   `SUFFIX`/`HAS_EDGE` and needed no node-specific special-casing (it never touches `batch_size`,
   `readout` or `scheduler`). Node-level shape: no `readout` key, no `scheduler` key, no

@@ -1,7 +1,7 @@
 experiment_name: deepergcn_softmax_questions
 
 # Shared knobs (width, depth, dropout, lr, weight_decay) are LDNA's tuned values from
-# configs/ldna_questions_h64l2.yaml, broadcast verbatim by scripts/broadcast.py; model-internal
+# configs/ldna_questions.yaml, broadcast verbatim by scripts/broadcast.py; model-internal
 # settings with no LDNA counterpart keep this model's own defaults. DeeperGCN keeps its intrinsic
 # `res+` scheme and ignores the shared `residual` flag.
 #
@@ -26,7 +26,7 @@ data_args:
   root: data/questions/
 
 # Training specific arguments/hyperparameters
-cuda: 2
+cuda: 1
 mem_fraction: 0.30
 seed: 42
 train_args:

@@ -11,13 +11,13 @@ experiment_name: ldna_questions_ungated
 # stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
 model: LDNA
 model_args:
-  hidden_channels: 128
-  out_channels: 128
-  num_layers: 3
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 2
   num_pre_layers: 1
   num_post_layers: 1
   num_pred_layers: 3
-  dropout: 0.5
+  dropout: 0.616143
   residual: true
   rank_mode: none
 
@@ -27,8 +27,8 @@ data_args:
   root: data/questions/
 
 # Training specific arguments/hyperparameters
-cuda: 3
-mem_fraction: 0.85
+cuda: 2
+mem_fraction: 0.30
 seed: 42
 train_args:
   runs: 10
@@ -37,8 +37,8 @@ train_args:
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 3.0e-3
-    weight_decay: 5.0e-4
+    lr: 0.0048711
+    weight_decay: 5.3e-6
   evaluator: ROCAUCEvaluator
 checkpoint_dir: out/checkpoints/
 log_dir: out/logs/

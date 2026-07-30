@@ -1,7 +1,7 @@
 experiment_name: gcn_questions
 
 # Shared knobs (width, depth, dropout, lr, weight_decay) are LDNA's tuned values from
-# configs/ldna_questions_h64l2.yaml, broadcast verbatim by scripts/broadcast.py; model-internal
+# configs/ldna_questions.yaml, broadcast verbatim by scripts/broadcast.py; model-internal
 # settings with no LDNA counterpart keep this model's own defaults.
 #
 # No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse

@@ -327,9 +327,12 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > globs `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
 > selects the matching GINE/GIN template for the `GNN-VPA` config the same way.
 
-> **`DGN` is excluded at node level — a structural exclusion, like `ogbg-ppa` and
-> `ogbn-proteins` in § Datasets.** DGN is the one baseline that needs a precomputed input the
-> node path cannot produce: `data_utils/preprocess.py: add_eig_vec` materializes a dense `N × N`
+> **`DGN` is excluded at node level — an IMPLEMENTATION-COST exclusion, NOT a structural one.**
+> It is a weaker exclusion than `ogbg-ppa` and `ogbn-proteins` in § Datasets and must not be
+> described as the same thing: those two are excluded because a canonical node order is
+> *undefinable* without node features, whereas DGN's field is perfectly well defined here and it is
+> only *our* implementation that takes a dense path. DGN is the one baseline needing a precomputed
+> input this implementation cannot produce at scale: `data_utils/preprocess.py: add_eig_vec` materializes a dense `N × N`
 > adjacency (`to_dense_adj`) and runs `eigh` on the Laplacian of every connected component. That
 > is fine for graphs of tens of nodes and infeasible for one graph of 48,921 (a float32 `N × N`
 > is 9.6 GB before the decomposition, and `eigh` on it is O(N³)); the resolver's `NODE_DATASETS`
@@ -339,8 +342,12 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > `scripts/broadcast.py` and the ranking simply do not see one. Node level therefore ranks LDNA
 > plus **ten** baseline configs (`gcn`, `gin`, `sage`, `gat`, `gatv2`, `pna`, `egc`,
 > `deepergcn_softmax`, `deepergcn_powermean`, `vpa`) rather than the eleven used at graph level.
-> A sparse Lanczos field would be the fix if DGN is ever wanted here, and § Baselines' DGN note
-> above records why that path was measured and rejected once already on `ogbg-code2`.
+> A sparse Lanczos field would be the fix if DGN is ever wanted here; § Baselines' DGN note above
+> records why that path was measured and rejected once already on `ogbg-code2` (four settings whose
+> failure modes are all silent). **Whether it is practical at 48,921 nodes is untested** — a sparse
+> shift-invert `eigsh` was started during review and killed after ~6 minutes still factorizing, so
+> "DGN cannot run here" is a statement about this codebase, not about DGN. Anyone asking why the one
+> heterophilous dataset has no DGN row deserves that answer rather than the stronger-sounding one.
 
 ---
 
