@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import Counter
 from statistics import median
 
 import optuna
@@ -11,37 +12,60 @@ from utils import evaluator_resolver, loss_resolver, model_and_data_resolver, te
 from utils.evaluator import Code2Evaluator
 from utils.resolver import NODE_DATASETS
 
-# Search epoch cap for the node-level datasets. Full-graph transductive training runs ONE optimizer
-# step per epoch where a graph-level epoch runs 130-680, so the graph-level cap of 50 would score a
-# node trial after 50 steps of the protocol's 1000-step budget — before it has trained at all. 333
-# keeps the ratio the graph-level pair sets (a 50-epoch search cap against 150 final epochs, i.e. a
-# third of the final budget), applied to the node budget of 1000 steps (§ Evaluation protocol), and
-# the measured curve says a third is enough: on Questions the validation optimum falls near step 150
-# at lr=3e-3 and the curve is flat from ~500 at lr=3e-4, so a 333-step cap contains the optimum of a
-# well-scaled config with room to spare. Since a node trial is scored by its best epoch (below), a
-# cap only has to CONTAIN each config's optimum; it does not have to reach the end of the budget.
-NODE_SEARCH_EPOCHS = 333
+# Steps a node-level search trial runs: the dataset's FULL final budget, i.e. no search cap. Full-
+# graph transductive training runs ONE optimizer step per epoch where a graph-level epoch runs
+# 130-680, so the graph-level cap of 50 would score a node trial after 50 steps and the ratio-
+# preserving alternative (a third of the budget, 333) still truncates. There is nothing to concede
+# anyway: the cap exists only to bound wall-clock, and a full Questions trial is ~79 s. Removing it
+# also buys exactness — measured over six configs spanning this space, the rank correlation between
+# the search score and the reported metric is 0.60 at a 333-step cap and 1.00 uncapped, because a cap
+# under-rates any config whose optimum lands past it and the measured optima ranged from step 117 to
+# step 559. Uncapped, no assumption about where the optimum sits has to transfer between datasets.
+# Per-dataset because the budgets differ: arxiv is still climbing at step 1000 (measured), and 2000
+# is what every work that beats OGB's reference uses (§ Evaluation protocol).
+NODE_SEARCH_EPOCHS = {'Questions': 1000, 'ogbn-arxiv': 2000}
 
-# Predicted full-graph peak memory, from the ogbn-arxiv measurement (LDNA, 3 training steps,
-# torch.cuda.max_memory_allocated on a 49 GB A6000): 18.33 GiB at h=128/L=3 and 35.58 GiB at
-# h=256/L=3 — linear in width and depth, i.e. ~6.1 GiB per layer at h=128. The cost is dominated by
-# LDNAConv's per-EDGE activations rather than by its 0.2-0.7M parameters, so the constant is carried
-# per edge entry and scaled to each dataset's own edge_index width.
-NODE_MEM_GIB_PER_LAYER = 6.1
-NODE_EDGE_ENTRIES = {'Questions': 307_080, 'ogbn-arxiv': 2_315_598}
+# Width of the rolling median a node trial is scored by (see the end of `train_LDNA`). Five matches
+# the graph-level rule's window, and measured rank correlation with the reported metric falls as the
+# window widens (+0.60 at 5, +0.47 at 11 and 25) because a wider window blurs a peak the curve only
+# holds briefly.
+NODE_SCORE_WINDOW = 5
+
+# Predicted full-graph peak RESERVED memory, which is what `mem_fraction` actually caps. Fit affine
+# in depth rather than purely proportional: the per-layer term alone missed the fixed encoder and
+# feature cost and read low everywhere, worst at L=2. The affine form reproduces both arxiv
+# measurements at h=128 exactly (13.36 GiB allocated at L=2, 18.33 at L=3) and stays ~3%
+# conservative at h=256/L=3 (36.60 predicted vs 35.58 measured). The cost is dominated by
+# LDNAConv's per-EDGE activations rather than by its 0.2-0.7M parameters, so the constants are
+# carried per edge entry and scaled to each dataset's own edge_index width.
+NODE_MEM_GIB_FIXED = 3.42
+NODE_MEM_GIB_PER_LAYER = 4.97
+# Allocator overhead: `mem_fraction` caps RESERVED memory, which sits above allocated. Measured
+# across six configs on both datasets the gap is 0.42-0.85 GiB and does NOT scale with the
+# allocation — it looks large in relative terms only on the small configs (28% of a 1.9 GiB
+# Questions run, 1.9% of a 35.6 GiB arxiv one). So it is carried as an ADDITIVE headroom. A
+# multiplicative margin would over-predict exactly where it matters: at h=256/L=3 on arxiv a 1.2x
+# factor gives 44 GiB and prunes a config measured to reserve 36.27.
+NODE_MEM_GIB_OVERHEAD = 1.5
+NODE_EDGE_ENTRIES = {'Cora': 10_556, 'Questions': 307_080, 'ogbn-arxiv': 2_315_598}
 
 
 def _node_peak_gib(dataset: str, hidden_channels: int, num_layers: int) -> float:
-    # Predicted ALLOCATED peak. `mem_fraction` caps reserved memory, which ran 2-15% above allocated
-    # in the measurements, so a trial predicted just under the budget can still OOM — deliberately,
-    # since the prune has to err permissive: a config wrongly pruned is never scored and biases the
-    # search exactly the way an OOM swallowed by `catch=(RuntimeError,)` does, while a config wrongly
-    # admitted just costs one failed trial. Adding the margin here would exclude h=256/L=3 on arxiv,
-    # which the measurement shows fits (36.27 GiB reserved under a 40.29 GiB budget). The law is fit
-    # at L=3 and reads slightly low off it — arxiv at h=128/L=2 allocated 13.36 GiB against a
-    # predicted 12.20, the per-layer term missing the fixed encoder/feature cost.
-    return (NODE_MEM_GIB_PER_LAYER * num_layers * (hidden_channels / 128)
-            * NODE_EDGE_ENTRIES[dataset] / NODE_EDGE_ENTRIES['ogbn-arxiv'])
+    # The prune must err CONSERVATIVE, which is the opposite of what it looks like it should do.
+    # A pruned trial and a failed one are not equivalent to the sampler: optuna's TPE splits
+    # RUNNING/COMPLETE/PRUNED trials and scores a prune with no intermediate values as worst, so a
+    # prune actively steers sampling away from that region, while a FAIL trial is filtered out
+    # upstream and teaches it nothing. Measured on this control flow (arxiv box, 100 trials,
+    # seed 42): pruning the infeasible region put 55/100 trials on the feasible point against 9/100
+    # when the same configs OOMed instead. Being permissive therefore buys nothing and costs OOMs.
+    #
+    # CAVEAT the depth term is fit at L=2 and L=3, so anything past ~L=4 is an extrapolation; at
+    # h=128/L=7 on arxiv it lands just inside a 0.85 budget and could still OOM into the study's
+    # `catch`. That costs one trial slot, which is the acceptable side of the asymmetry above.
+    return ((NODE_MEM_GIB_FIXED + NODE_MEM_GIB_PER_LAYER * num_layers)
+            * (hidden_channels / 128)
+            * NODE_EDGE_ENTRIES[dataset] / NODE_EDGE_ENTRIES['ogbn-arxiv']
+            + NODE_MEM_GIB_OVERHEAD)
 
 
 def _get_study_settings(dataset: str) -> dict:
@@ -353,15 +377,22 @@ def train_LDNA(
         if not node_level and epochs_no_improve >= patience:
             break
 
-    # A node trial is scored by its BEST epoch rather than by its last five. The node runs report
-    # `utils/logger.py`'s best-over-epochs value and treat the step budget as a cap containing the
-    # optimum rather than as a target (§ Evaluation protocol), so the search has to rank configs by
-    # the quantity the final ranking will read. Measured on Questions, a last-five median would not:
-    # at the validation-selected lr=3e-3 the curve peaks at 0.742 near step 150 and decays to 0.609
-    # by step 1000, while a slower lr=3e-4 climbs to 0.735 — under a last-five median the slow config
-    # wins at every cap, under best-epoch (and in what the final runs would report) the fast one does.
+    # A node trial is scored by the best ROLLING MEDIAN over the run, not by the median of its last
+    # five epochs. The last-five rule bundles two assumptions: a median resists single-epoch noise
+    # (still true here), and the last epochs are where the config has settled (false here — one
+    # optimizer step per epoch means the model overfits fast and the validation curve peaks early
+    # then decays, measured train ROC-AUC 0.9996 against validation 0.75). Keeping the median and
+    # moving WHERE it is taken preserves the noise robustness while measuring the best sustained
+    # level the config reached, which is what `utils/logger.py` reports (§ Evaluation protocol).
+    # Measured over six configs spanning this space, rank correlation with the reported metric:
+    # last-five median -0.20, and still negative at windows of 25/50/100 (the decayed tail says
+    # nothing about the peak, and a slow config's tail is HIGHER); rolling median +0.60 at a 333-step
+    # cap and +1.00 uncapped, matching a raw max on ranking while a lone spike cannot move a
+    # five-point median.
     if node_level:
-        return max(all_results) if mode == 'max' else min(all_results)
+        window = min(NODE_SCORE_WINDOW, len(all_results))
+        rolling = [median(all_results[i:i + window]) for i in range(len(all_results) - window + 1)]
+        return max(rolling) if mode == 'max' else min(rolling)
 
     if epochs < 5:
         return median(all_results)
@@ -480,15 +511,16 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # This is faster: it drops the expensive large-model trials and shrinks the search space,
     # while keeping the pinned width/depth as a shared value for the fairness protocol.
     #
-    # The node-level datasets get their own (width, depth) box. 128 is a hard FLOOR — the per-node
-    # head is `num_pred_heads` wide, and a narrower model would trip `num_pred_heads > out_channels`
-    # on the multi-label member of the node suite (PPI, 121 tasks) — and 256 is the widest that fits
-    # ogbn-arxiv full-graph. Depth is per dataset, the measured k-hop covering depth + 2:
-    # Questions [2, 6], ogbn-arxiv [2, 7] (§ Datasets → node-level).
+    # The node-level datasets get their own (width, depth) box. 64 is included because the wired
+    # datasets can use it: the floor exists only to keep `num_pred_heads < out_channels`, which binds
+    # at 121 heads but not at 40 (ogbn-arxiv) or 1 (Questions), and it is the cheapest width that
+    # keeps the wide/deep corner of the arxiv box feasible at all. 256 is the widest that fits arxiv
+    # full-graph. Depth is per dataset, the measured k-hop covering depth + 2: Questions [2, 6],
+    # ogbn-arxiv [2, 7] (§ Datasets → node-level).
     node_level = dataset in NODE_DATASETS
     hidden_channels = fix_hidden_channels if fix_hidden_channels is not None \
         else trial.suggest_categorical('hidden_channels',
-                                       [128, 256] if node_level else [128, 256, 512, 1024])
+                                       [64, 128, 256] if node_level else [128, 256, 512, 1024])
     num_layers = fix_num_layers if fix_num_layers is not None \
         else trial.suggest_int('num_layers', 2,
                                {'Questions': 6, 'ogbn-arxiv': 7}.get(dataset, 8))
@@ -499,7 +531,14 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # `_get_training_config` leaves `batch_size` out of their `data_args`.
     batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256,
                   'ogbg-code2': 128, 'Questions': None, 'ogbn-arxiv': None}[dataset]
-    lr = trial.suggest_float('lr', 1e-5, 1e-2, log=True)
+    # Node level widens the lr range upward. The published full-graph arxiv configs sit at 1e-2
+    # (OGB's own node example, tunedGNN), which is the graph-level range's exact endpoint — and a
+    # log-uniform prior over [1e-5, 1e-2] puts only ~14% of its mass above 3e-3, so TPE would rarely
+    # settle on a boundary it can only approach. `weight_decay` is left alone: every large-node-graph
+    # reference uses exactly 0, which this range cannot express, but over a fixed step budget 1e-6 is
+    # numerically indistinguishable from 0.
+    lr = trial.suggest_float('lr', 1e-4 if node_level else 1e-5, 3e-2 if node_level else 1e-2,
+                             log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
 
     # --- Memory feasibility ---
@@ -507,7 +546,10 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # box can exceed the card. Predicting the peak and pruning HERE is what keeps an infeasible
     # config visible: left to OOM it would be swallowed by `study.optimize(catch=(RuntimeError,))`
     # as a failed trial, and the sampler would keep proposing from a region it never scored.
-    if node_level and torch.cuda.is_available():
+    # Gated on the REQUESTED device being a GPU, not on one merely being present: `torch.device('cpu')`
+    # has index None, which `get_device_properties` resolves to GPU 0, so a CPU run would otherwise be
+    # pruned against a card it is not using.
+    if node_level and torch.device(device).type == 'cuda':
         budget = mem_fraction * torch.cuda.get_device_properties(
             torch.device(device).index).total_memory / 1024 ** 3
         peak = _node_peak_gib(dataset, hidden_channels, num_layers)
@@ -543,9 +585,21 @@ def main(args):
         settings = _get_study_settings(args.dataset)
 
         # Epoch cap, resolved per level unless the CLI names one: a node-level epoch is a single
-        # optimizer step, so the graph-level cap of 50 is not the same amount of training there.
+        # optimizer step, so the graph-level cap of 50 is not the same amount of training there. At
+        # node level a trial runs the dataset's full budget (see NODE_SEARCH_EPOCHS).
         node_level = args.dataset in NODE_DATASETS
-        epochs = args.epochs if args.epochs is not None else (NODE_SEARCH_EPOCHS if node_level else 50)
+        epochs = args.epochs if args.epochs is not None \
+            else (NODE_SEARCH_EPOCHS[args.dataset] if node_level else 50)
+
+        # `mem_fraction` also resolves per level. The default of 0.30 exists so a graph-level search
+        # can share a card; at node level it is a hard constraint on which ARCHITECTURES the search
+        # can see at all, because the feasibility prune below measures every (width, depth) against
+        # it. At 0.30 of a 47.4 GiB card the arxiv box collapses to a single admissible point, so the
+        # search would silently stop searching width and depth. A node search therefore takes the
+        # card (0.85), the same value the node configs use; pass --mem_fraction explicitly to
+        # override when co-locating, and read the admissible-set report printed below before doing so.
+        mem_fraction = args.mem_fraction if args.mem_fraction is not None \
+            else (0.85 if node_level else 0.30)
 
         # Create a study object. `n_warmup_steps` is counted in epochs and so inherits the same unit
         # mismatch as the cap: 10 epochs is a fifth of the graph-level cap but a thirtieth of the
@@ -563,17 +617,45 @@ def main(args):
         # study alive when an individual trial fails (e.g. a CUDA OOM from a large sampled
         # model while sharing the GPU) — that trial is marked failed and the search continues
         # instead of aborting the whole run.
+        # Report the architecture box the memory prune actually admits, BEFORE spending anything. The
+        # prune is what keeps an infeasible config visible rather than silently OOMed, but an over-
+        # tight budget turns it into the opposite failure: a box narrowed to a point looks like a
+        # normal search while no longer searching width or depth. An empty box is fatal outright.
+        if node_level:
+            box = [(h, l) for h in (64, 128, 256)
+                   for l in range(2, {'Questions': 6, 'ogbn-arxiv': 7}[args.dataset] + 1)
+                   if _node_peak_gib(args.dataset, h, l)
+                   <= mem_fraction * torch.cuda.get_device_properties(
+                       torch.device(args.device).index).total_memory / 1024 ** 3]
+            print(f"Memory-admissible (hidden_channels, num_layers) at mem_fraction "
+                  f"{mem_fraction}: {len(box)} of "
+                  f"{3 * ({'Questions': 6, 'ogbn-arxiv': 7}[args.dataset] - 1)} — {box}")
+            if not box:
+                raise ValueError(
+                    f"No (hidden_channels, num_layers) point fits {mem_fraction} of "
+                    f"{args.device}; raise --mem_fraction or use a freer card")
+
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
                                     epochs=epochs, patience=args.patience,
-                                    min_delta=args.min_delta, mem_fraction=args.mem_fraction,
+                                    min_delta=args.min_delta, mem_fraction=mem_fraction,
                                     fix_hidden_channels=args.fix_hidden_channels,
                                     fix_num_layers=args.fix_num_layers),
             n_trials=args.n_trials,
             catch=(RuntimeError,),
         )
 
-        # Print out the best trial
+        # `study.best_trial` raises if NOTHING completed, and it is outside study.optimize so
+        # `catch=(RuntimeError,)` does not apply — an all-pruned or all-failed study would abort here
+        # and discard every result the run did produce. Report the breakdown instead.
+        completed = study.get_trials(states=(optuna.trial.TrialState.COMPLETE,), deepcopy=False)
+        if not completed:
+            states = Counter(t.state.name for t in study.trials)
+            print(f"No trial completed. States: {dict(states)}. Nothing to report — a search that "
+                  f"prunes or fails everything usually means the memory budget or the search space "
+                  f"is wrong, not the model.")
+            return study
+
         best_trial = study.best_trial
         print(f"Number of finished trials: {len(study.trials)}")
         print("Best trial:")
@@ -594,7 +676,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='cuda:0')
     # Cap on this process's share of the (shared) GPU. Lower it on cards with an extra
     # co-tenant so a large sampled model can't OOM another user's job (see § GPU policy).
-    parser.add_argument('--mem_fraction', type=float, default=0.30)
+    # Left unset it resolves per level in main(): 0.85 for node datasets (a node search's admissible
+    # architecture box is defined by this value), 0.30 for graph-level.
+    parser.add_argument('--mem_fraction', type=float, default=None)
     # Left unset the cap resolves per level in main(): 50 graph-level epochs, or NODE_SEARCH_EPOCHS
     # on the node-level datasets, where one epoch is one optimizer step.
     parser.add_argument('--epochs', type=int, default=None)
