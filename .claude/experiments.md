@@ -149,11 +149,17 @@ the last one first if the budget shrinks). Sizes below are from the PyG/OGB meta
 > exactly and staying ~3% conservative at h=256/L=3. The cost is dominated by `LDNAConv`'s per-edge
 > activations over 2.3M edges rather than by the 0.2–0.7M parameters, which is why it is carried per
 > edge entry and rescales to any node dataset. `mem_fraction` caps RESERVED memory, and the allocator
-> overhead is **additive** — 0.42–0.85 GiB across six configs on both datasets, not scaling with the
-> allocation — so add ~1.5 GiB rather than a percentage. The real card is 47.40 GiB, not the 49140 MiB
+> overhead is **additive** — 0.42–2.69 GiB across the six measured configs, and *anti*-correlated with
+> size (the 35.58 GiB run reserved 0.69 GiB extra, the 18.33 GiB one 2.69) because it is allocator
+> fragmentation rather than a share of the tensor budget. So add the worst observed gap, **2.7 GiB**,
+> rather than a percentage: a multiplicative margin over-predicts where it matters (a 1.2× factor gives
+> 44 GiB at h=256/L=3 and would prune a config measured to reserve 36.27), while any additive value
+> below 2.69 under-predicts the h=128/L=3 point above. The real card is 47.40 GiB, not the 49140 MiB
 > nvidia-smi reports, so the 0.85 cap is a 40.29 GiB budget; that admits **L ≤ 7 at h=64, L ≤ 6 at
-> h=128, L ≤ 3 at h=256** on arxiv (14 of its 18 (h, L) points) and all 15 of Questions'. The deeper
-> and wider corner needs the sampled regime. Depth past ~L=4 is extrapolated from the L=2/L=3 fit.
+> h=128, L ≤ 2 at h=256** on arxiv — 6 + 5 + 2 = **13 of its 18 (h, L) points** — and all 15 of
+> Questions'. The deeper and wider corner needs the sampled regime. Depth past ~L=4 is extrapolated
+> from the L=2/L=3 fit, so h=128/L=7 lands just outside the budget and is pruned rather than left to
+> OOM.
 
 ### 3. Synthetic expressiveness
 
@@ -479,7 +485,7 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
 | early stopping | **off** | `patience=20` is 20 steps (2% of the budget), and its calibration (2× the scheduler patience) is void with no scheduler |
 | `epochs` | **no search cap** — a trial runs the full budget (`Questions` 1000, `ogbn-arxiv` 2000) | the cap only ever bounded wall-clock, and a full Questions trial is ~79 s. It also costs exactness: measured over six configs, rank correlation with the reported metric is 0.60 at a 333-step cap and **1.00 uncapped**, since a cap under-rates any config whose optimum lands past it and the measured optima span step 117 to step 559 |
 | trial score | **best rolling median** (window 5) over the run, not the last-five median | the node runs report `Logger`'s best-over-epochs value, and with a constant LR the curve is not monotone. Measured on Questions (split 0, 1000 steps): h=128/L=3 at lr 3e-3 peaks at **0.742** near step 150 and decays to 0.609 by step 1000; h=256/L=5 at lr 1e-3 peaks at 0.730, also near step 150; h=128/L=3 at lr 3e-4 climbs slowly to 0.735 at step 800. The last-five rule bundles two assumptions — a median resists single-epoch noise (still true) and the last epochs are where the config settled (false here) — so the median is kept and only *where* it is taken moves. Measured rank correlation with the reported metric: last-five median **−0.20**, and still negative at windows of 25/50/100 (a decayed tail says nothing about the peak, and a slow config's tail is *higher*); rolling median **+1.00** uncapped, matching a raw max on ranking while a lone spike cannot move a five-point median |
-| memory prune | `optuna.TrialPruned()` when the predicted full-graph peak exceeds `mem_fraction ×` the card | reserved peak ≈ (3.42 + 4.97·L) · (h/128) · (edges / 2.32M) + 1.5 GiB, affine in depth because a purely per-layer term missed the fixed encoder cost and read low everywhere. The allocator overhead is **additive** (measured 0.42–0.85 GiB across six configs on both datasets, not scaling with size), so a multiplicative margin would over-predict where it matters — at h=256/L=3 a 1.2× factor gives 44 GiB and prunes a config measured to reserve 36.27. The estimate errs **conservative**: a prune and an OOM are not equivalent to the sampler, since TPE scores a pruned trial as worst and so steers away, while a `FAIL` trial is filtered out and teaches it nothing (measured: 55/100 vs 9/100 trials reaching the feasible point). Depth past ~L=4 is an extrapolation from the L=2/L=3 fit |
+| memory prune | `optuna.TrialPruned()` when the predicted full-graph peak exceeds `mem_fraction ×` the card | reserved peak ≈ (3.42 + 4.97·L) · (h/128) · (edges / 2.32M) + 2.7 GiB, affine in depth because a purely per-layer term missed the fixed encoder cost and read low everywhere. The allocator overhead is **additive** and anti-correlated with size (measured 0.42–2.69 GiB; the largest gap is on the *smaller* arxiv config), so it is carried at the worst observed value — a multiplicative margin would over-predict where it matters (a 1.2× factor gives 44 GiB at h=256/L=3, pruning a config measured to reserve 36.27) and anything under 2.69 under-predicts the recorded h=128/L=3 point. The estimate errs **conservative**: a prune and an OOM are not equivalent to the sampler, since TPE scores a pruned trial as worst and so steers away, while a `FAIL` trial is filtered out and teaches it nothing (measured: 55/100 vs 9/100 trials reaching the feasible point). Depth past ~L=4 is an extrapolation from the L=2/L=3 fit |
 
 ---
 
@@ -643,8 +649,16 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
 Mirror of `AGENTS.md` (§ Autonomous optimization); concrete limits here.
 
 - Compute budget per optimization session: **100 Optuna trials/dataset** (the default).
-  Three compute savers in the search, all **graph-level only** — the node path runs the full
-  budget with no early stopping (§ Search spaces → node-level): a low **epoch cap of 50** (vs 150 for final runs),
+  **Node-level wall-clock ceilings** (§ Guardrails requires one per search): `Questions` ~1 GPU-h
+  for 100 trials at its 1000-step budget (~79 ms/step); **`ogbn-arxiv` ~26 GPU-h** at its 2000-step
+  budget (~0.87 s/step measured, ~29 min per full trial, with `MedianPruner` culling ~50% of total
+  steps; 48 GPU-h unpruned). arxiv is now the most expensive single job in the project and needs a
+  card held exclusively — `mem_fraction` is a self-cap, not a reservation, so 0.85 on a card already
+  holding another user's work breaks the never-OOM-anyone rule.
+  Three compute savers in the search. Two are **graph-level only** — the node path runs its full
+  budget with no early stopping (§ Search spaces → node-level) — while `MedianPruner` is active on
+  both levels and does most of the node path's cost control (~50% of total steps culled): a low
+  **epoch cap of 50** (vs 150 for final runs),
   `MedianPruner` (`n_warmup_steps=10`) that kills *bad* trials early relative to others,
   and **early stopping** (`patience=20`, `min_delta=1e-3`) that ends *any* trial once its
   validation metric saturates. `batch_size` is a fixed per-dataset power of 2, not

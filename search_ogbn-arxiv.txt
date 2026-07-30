@@ -1,0 +1,2 @@
+Memory-admissible (hidden_channels, num_layers) at mem_fraction 0.35: 5 of 18 — [(64, 2), (64, 3), (64, 4), (64, 5), (128, 2)]
+No trial completed. States: {}. Nothing to report — a search that prunes or fails everything usually means the memory budget or the search space is wrong, not the model.

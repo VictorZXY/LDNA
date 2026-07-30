@@ -41,13 +41,20 @@ NODE_SCORE_WINDOW = 5
 NODE_MEM_GIB_FIXED = 3.42
 NODE_MEM_GIB_PER_LAYER = 4.97
 # Allocator overhead: `mem_fraction` caps RESERVED memory, which sits above allocated. Measured
-# across six configs on both datasets the gap is 0.42-0.85 GiB and does NOT scale with the
-# allocation — it looks large in relative terms only on the small configs (28% of a 1.9 GiB
-# Questions run, 1.9% of a 35.6 GiB arxiv one). So it is carried as an ADDITIVE headroom. A
-# multiplicative margin would over-predict exactly where it matters: at h=256/L=3 on arxiv a 1.2x
-# factor gives 44 GiB and prunes a config measured to reserve 36.27.
-NODE_MEM_GIB_OVERHEAD = 1.5
+# across six configs on both datasets the gap is 0.42-2.69 GiB and is ANTI-correlated with size --
+# the 35.58 GiB arxiv run reserved only 0.69 GiB extra while the 18.33 GiB one reserved 2.69, because
+# the gap is allocator fragmentation history rather than a share of the tensor budget. So it is
+# carried as an ADDITIVE headroom at the WORST observed value, not a multiplicative margin: a 1.2x
+# factor would predict 44 GiB at h=256/L=3 and prune a config measured to reserve 36.27, while
+# anything below 2.69 under-predicts the h=128/L=3 point that is actually recorded.
+NODE_MEM_GIB_OVERHEAD = 2.7
 NODE_EDGE_ENTRIES = {'Cora': 10_556, 'Questions': 307_080, 'ogbn-arxiv': 2_315_598}
+
+# The node-level architecture box, in ONE place: `objective` samples from it, `main` enumerates it to
+# report which points the memory prune admits, and the two must not drift apart. `Cora` is absent
+# deliberately -- it is the node path's smoke test, not a searched dataset (§ Datasets).
+NODE_WIDTHS = (64, 128, 256)
+NODE_MAX_LAYERS = {'Questions': 6, 'ogbn-arxiv': 7}
 
 
 def _node_peak_gib(dataset: str, hidden_channels: int, num_layers: int) -> float:
@@ -402,6 +409,13 @@ def train_LDNA(
     # cap and +1.00 uncapped, matching a raw max on ranking while a lone spike cannot move a
     # five-point median.
     if node_level:
+        # A run shorter than the window collapses to a single window, so the score is just the median
+        # of the whole run and the max/min is inert -- only reachable via `--epochs <= 5`, mirroring
+        # the graph-level `epochs < 5` branch below. An empty run has no median at all, and
+        # `StatisticsError` subclasses ValueError rather than RuntimeError, so it would escape the
+        # study's `catch` and abort the search instead of failing one trial.
+        if not all_results:
+            raise optuna.TrialPruned()
         window = min(NODE_SCORE_WINDOW, len(all_results))
         rolling = [median(all_results[i:i + window]) for i in range(len(all_results) - window + 1)]
         return max(rolling) if mode == 'max' else min(rolling)
@@ -532,10 +546,9 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     node_level = dataset in NODE_DATASETS
     hidden_channels = fix_hidden_channels if fix_hidden_channels is not None \
         else trial.suggest_categorical('hidden_channels',
-                                       [64, 128, 256] if node_level else [128, 256, 512, 1024])
+                                       list(NODE_WIDTHS) if node_level else [128, 256, 512, 1024])
     num_layers = fix_num_layers if fix_num_layers is not None \
-        else trial.suggest_int('num_layers', 2,
-                               {'Questions': 6, 'ogbn-arxiv': 7}.get(dataset, 8))
+        else trial.suggest_int('num_layers', 2, NODE_MAX_LAYERS.get(dataset, 8))
     dropout = trial.suggest_float('dropout', 0.1, 0.7)
     # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
     # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
@@ -638,15 +651,19 @@ def main(args):
         # prune is what keeps an infeasible config visible rather than silently OOMed, but an over-
         # tight budget turns it into the opposite failure: a box narrowed to a point looks like a
         # normal search while no longer searching width or depth. An empty box is fatal outright.
-        if node_level:
-            box = [(h, l) for h in (64, 128, 256)
-                   for l in range(2, {'Questions': 6, 'ogbn-arxiv': 7}[args.dataset] + 1)
-                   if _node_peak_gib(args.dataset, h, l)
-                   <= mem_fraction * torch.cuda.get_device_properties(
-                       torch.device(args.device).index).total_memory / 1024 ** 3]
-            print(f"Memory-admissible (hidden_channels, num_layers) at mem_fraction "
-                  f"{mem_fraction}: {len(box)} of "
-                  f"{3 * ({'Questions': 6, 'ogbn-arxiv': 7}[args.dataset] - 1)} — {box}")
+        # Gated on the REQUESTED device, matching the prune in `objective`: on a CPU run there is no
+        # budget to enumerate against, and `torch.device('cpu').index` is None, which
+        # `get_device_properties` would resolve to GPU 0 — reporting a constraint that is not
+        # applied, or raising on a machine with no GPU at all.
+        if node_level and torch.device(args.device).type == 'cuda':
+            depths = range(2, NODE_MAX_LAYERS[args.dataset] + 1)
+            budget = mem_fraction * torch.cuda.get_device_properties(
+                torch.device(args.device).index).total_memory / 1024 ** 3
+            box = [(h, l) for h in NODE_WIDTHS for l in depths
+                   if _node_peak_gib(args.dataset, h, l) <= budget]
+            print(f"Memory-admissible (hidden_channels, num_layers) within {budget:.2f} GiB "
+                  f"(mem_fraction {mem_fraction}): {len(box)} of "
+                  f"{len(NODE_WIDTHS) * len(depths)} — {box}")
             if not box:
                 raise ValueError(
                     f"No (hidden_channels, num_layers) point fits {mem_fraction} of "
