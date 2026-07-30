@@ -14,9 +14,12 @@
   transforms, dataset classes), `utils/` (resolver, evaluators, logger, tee), `scripts/`
   (operational helpers), and `requirements.txt`.
 - `hyperparam_search.py` tunes LDNA on all five graph-level datasets (ogbg-molhiv,
-  ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2). Search mechanics — ranges, pruning,
-  plateau early-stopping, the 50-epoch search cap (vs 150 final), and gradient clipping —
-  live in `.claude/experiments.md` (§ Search spaces).
+  ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2) and on the two wired node-level ones
+  (Questions, ogbn-arxiv). Search mechanics — ranges, pruning, plateau early-stopping, the
+  50-epoch search cap (vs 150 final), and gradient clipping — live in
+  `.claude/experiments.md` (§ Search spaces), together with the node-level space, whose
+  epoch-counted settings all differ because a full-graph epoch is one optimizer step
+  (no schedule, no early stopping, a 333-step cap, best-epoch scoring, memory prune).
 - `readout` (incl. `attention` = `AttentionalAggregation`) and a per-layer `residual` flag
   are shared knobs supported by every model family (all configs use `readout: attention` +
   `residual: true`); the resolver unifies every model's encoder width to `hidden_channels`, so

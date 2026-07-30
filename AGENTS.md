@@ -55,7 +55,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 ## Repo architecture
 
 - `train.py`: main training entry point.
-- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports all five graph-level datasets (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`). Node-level search is not wired yet; the expressiveness datasets deliberately have none (their hyperparameters are protocol constants).
+- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports all five graph-level datasets (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`) and the two wired node-level ones (`Questions`, `ogbn-arxiv`). The node path differs wherever a setting is counted in epochs, since a full-graph epoch is one optimizer step: no LR schedule, no early stopping, a 333-step cap, best-epoch trial scoring, and a memory-feasibility prune (see `.claude/experiments.md` § Search spaces). The expressiveness datasets deliberately have no search (their hyperparameters are protocol constants).
 - `models/`: LDNA model code (`ldna_conv.py`, `ldna_net.py`), the shared node-feature `Encoder` (`encoder.py`), and baseline GNN model wrappers.
 - `data_utils/`: dataset-side code — `preprocess.py` (graph sorting/canonicalization, the node-level canonical rank, DGN eigenvector field, degree histogram), `transforms.py` (small transforms), `exp.py` (EXP/CEXP dataset), `brec.py` (BREC dataset + RPC evaluation core), `code2.py` (ogbg-code2 target-sequence utilities). Its `__init__.py` carries the torch>=2.6 `torch.load` compatibility shim.
 - `utils/resolver.py`: loads datasets, applies preprocessing, and builds the requested model.
