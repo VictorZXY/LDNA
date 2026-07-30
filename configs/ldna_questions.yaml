@@ -1,6 +1,6 @@
-experiment_name: ldna_questions_h256l5
+experiment_name: ldna_questions
 
-# Tuned candidate B: the second search's pick (50 trials, widths {32,64,128,256}, warm-started).
+# TUNED config for Questions -- the source of truth broadcast to every baseline.
 # The two Questions searches chose near-opposite architectures for validation scores 0.0045 apart
 # -- far inside the ~0.017 spread a single run carries -- so the architecture axis is flat here and
 # the choice cannot be made from search scores alone. Both candidates are run over the 10 official
@@ -13,13 +13,13 @@ experiment_name: ldna_questions_h256l5
 # § Evaluation protocol); a YAML null would arrive as the string 'None' and be rejected.
 model: LDNA
 model_args:
-  hidden_channels: 256
-  out_channels: 256
-  num_layers: 5
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 2
   num_pre_layers: 1
   num_post_layers: 1
   num_pred_layers: 3
-  dropout: 0.667468
+  dropout: 0.616143
   residual: true
 
 # Dataset specific arguments/hyperparameters
@@ -38,7 +38,7 @@ train_args:
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 3.794867e-3
+    lr: 4.871103e-3
     weight_decay: 5.3e-6
   evaluator: ROCAUCEvaluator
 checkpoint_dir: out/checkpoints/

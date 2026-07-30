@@ -23,7 +23,7 @@ data_args:
   root: data/questions/
 
 # Training specific arguments/hyperparameters
-cuda: 3
+cuda: 2
 mem_fraction: 0.30
 seed: 42
 train_args:
