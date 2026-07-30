@@ -323,9 +323,24 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
 > `edge_attr`). The rule is realized by the **config inventory**: each dataset ships only
 > `gine_<suffix>.yaml` (edge) *or* `gin_<suffix>.yaml` (edge-less), never both — currently
-> `gine_{hiv,molpcba,zinc}` and `gin_mnist` (code2 → `gin`). `scripts/broadcast.py` globs
-> `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
+> `gine_{hiv,molpcba,zinc}` and `gin_{mnist,questions}` (code2 → `gin`). `scripts/broadcast.py`
+> globs `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
 > selects the matching GINE/GIN template for the `GNN-VPA` config the same way.
+
+> **`DGN` is excluded at node level — a structural exclusion, like `ogbg-ppa` and
+> `ogbn-proteins` in § Datasets.** DGN is the one baseline that needs a precomputed input the
+> node path cannot produce: `data_utils/preprocess.py: add_eig_vec` materializes a dense `N × N`
+> adjacency (`to_dense_adj`) and runs `eigh` on the Laplacian of every connected component. That
+> is fine for graphs of tens of nodes and infeasible for one graph of 48,921 (a float32 `N × N`
+> is 9.6 GB before the decomposition, and `eigh` on it is O(N³)); the resolver's `NODE_DATASETS`
+> branch accordingly never calls `add_eig_vecs`, so a `dgn_<node>.yaml` would build a model whose
+> directional aggregators receive no field at all. The exclusion is recorded the same way the
+> GIN/GINE rule is — by the **config inventory**: node-level datasets ship no `dgn_*` config, so
+> `scripts/broadcast.py` and the ranking simply do not see one. Node level therefore ranks LDNA
+> plus **ten** baseline configs (`gcn`, `gin`, `sage`, `gat`, `gatv2`, `pna`, `egc`,
+> `deepergcn_softmax`, `deepergcn_powermean`, `vpa`) rather than the eleven used at graph level.
+> A sparse Lanczos field would be the fix if DGN is ever wanted here, and § Baselines' DGN note
+> above records why that path was measured and rejected once already on `ogbg-code2`.
 
 ---
 

@@ -20,9 +20,9 @@ import os
 import re
 
 SUFFIX = {'ogbg-molhiv': 'hiv', 'ogbg-molpcba': 'molpcba', 'ZINC': 'zinc',
-          'MNISTSuperpixels': 'mnist', 'ogbg-code2': 'code2'}
+          'MNISTSuperpixels': 'mnist', 'ogbg-code2': 'code2', 'Questions': 'questions'}
 HAS_EDGE = {'ogbg-molhiv': True, 'ogbg-molpcba': True, 'ZINC': True,
-            'MNISTSuperpixels': False, 'ogbg-code2': False}
+            'MNISTSuperpixels': False, 'ogbg-code2': False, 'Questions': False}
 
 
 def _fmt(v):

@@ -1,0 +1,41 @@
+experiment_name: egc_questions
+
+# Shared knobs (width, depth, dropout, lr, weight_decay) are LDNA's tuned values from
+# configs/ldna_questions_h64l2.yaml, broadcast verbatim by scripts/broadcast.py; model-internal
+# settings with no LDNA counterpart keep this model's own defaults.
+#
+# No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse
+# stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
+# No `scheduler` key: the node path trains at a constant LR (see .claude/experiments.md
+# § Evaluation protocol); a YAML null would arrive as the string 'None' and be rejected.
+model: EGC
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 2
+  use_multi_aggregators: True
+  num_pred_layers: 3
+  dropout: 0.616143
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: Questions
+data_args:
+  root: data/questions/
+
+# Training specific arguments/hyperparameters
+cuda: 2
+mem_fraction: 0.30
+seed: 42
+train_args:
+  runs: 10
+  epochs: 1000
+  eval_interval: 100
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.0048711
+    weight_decay: 5.3e-06
+  evaluator: ROCAUCEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
