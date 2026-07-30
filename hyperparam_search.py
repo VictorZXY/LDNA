@@ -325,6 +325,18 @@ def train_LDNA(
             else:
                 is_labelled = (y == y)
                 loss = loss_fn(out[is_labelled], y[is_labelled].float())
+
+            # A diverged trial is pruned rather than allowed to reach the evaluator. Gradient
+            # clipping only rescales FINITE gradients, so a high sampled lr can still produce
+            # non-finite activations — and `roc_auc_score` raises ValueError on NaN scores, which
+            # `study.optimize(catch=(RuntimeError,))` does NOT catch, so one diverged trial would
+            # abort the whole search. Pruning is also the right signal: a prune is scored worst and
+            # steers TPE away from that region, while a failed trial teaches the sampler nothing.
+            if not torch.isfinite(loss):
+                print(f"Trial {trial.number}: pruned at epoch {epoch} — loss diverged to "
+                      f"{loss.item()}")
+                raise optuna.TrialPruned()
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -531,13 +543,18 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # `_get_training_config` leaves `batch_size` out of their `data_args`.
     batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256,
                   'ogbg-code2': 128, 'Questions': None, 'ogbn-arxiv': None}[dataset]
-    # Node level widens the lr range upward. The published full-graph arxiv configs sit at 1e-2
-    # (OGB's own node example, tunedGNN), which is the graph-level range's exact endpoint — and a
-    # log-uniform prior over [1e-5, 1e-2] puts only ~14% of its mass above 3e-3, so TPE would rarely
-    # settle on a boundary it can only approach. `weight_decay` is left alone: every large-node-graph
-    # reference uses exactly 0, which this range cannot express, but over a fixed step budget 1e-6 is
-    # numerically indistinguishable from 0.
-    lr = trial.suggest_float('lr', 1e-4 if node_level else 1e-5, 3e-2 if node_level else 1e-2,
+    # Node level widens the lr range in both directions. The published full-graph arxiv configs sit
+    # at 1e-2 (OGB's own node example, tunedGNN), which is the graph-level range's exact ENDPOINT,
+    # and a log-uniform prior over [1e-5, 1e-2] puts only ~14% of its mass above 3e-3 — TPE would
+    # rarely settle on a boundary it can only approach. The upper bound is 5e-2 rather than 3e-2
+    # because the choice costs almost nothing and the boundary should not rest on an assumption:
+    # measured, widening moves 3 trials in 100 out of the band our own probes found best
+    # ([3e-4, 1e-2] holds 56/100 draws at 3e-2 against 53/100 at 5e-2), and lr optima shift with
+    # width and depth, which we only spot-checked at two widths and one depth. A lr that diverges is
+    # pruned in the training loop, so the extra headroom cannot cost more than a pruned trial.
+    # `weight_decay` is left alone: every large-node-graph reference uses exactly 0, which this range
+    # cannot express, but over a fixed step budget 1e-6 is numerically indistinguishable from it.
+    lr = trial.suggest_float('lr', 1e-4 if node_level else 1e-5, 5e-2 if node_level else 1e-2,
                              log=True)
     weight_decay = trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True)
 

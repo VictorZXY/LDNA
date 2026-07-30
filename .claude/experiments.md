@@ -402,7 +402,7 @@ LDNA search space in `hyperparam_search.py::objective` (all graph-level datasets
 | `hidden_channels` | {128, 256, 512, 1024} | categorical |
 | `num_layers` | [2, 8] | int (capped for stability — deep configs diverge sensitive baselines, see § stability below) |
 | `dropout` | [0.1, 0.7] | float (sub-0.1 dropout is not meaningful) |
-| `lr` | [1e-5, 1e-2] | log-uniform |
+| `lr` | [1e-5, 1e-2] | log-uniform (node level: **[1e-4, 5e-2]** — see § Search spaces → node-level) |
 | `weight_decay` | [1e-6, 1e-3] | log-uniform |
 | `batch_size` | not searched — per-dataset, power of 2 | implemented (see batch-size policy below) |
 | `epochs` | search cap **50**; final **150** | search early-stops at plateau (`patience=20`, `min_delta=1e-3`); final runs the full 150 |
