@@ -479,7 +479,7 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
 
 | Hyperparameter | Range / choices | Notes |
 |---|---|---|
-| `hidden_channels` | {64, 128, 256} | the floor exists only to keep `num_pred_heads < out_channels`, which binds at PPI's 121 tasks but not at arxiv's 40 or Questions' 1 — and 64 is the only width that leaves arxiv a searchable box on a shared card; 256 is the widest that fits arxiv full-graph |
+| `hidden_channels` | `Questions` {32, 64, 128, 256}, `ogbn-arxiv` {64, 128, 256} | per dataset because the floor is a **model** constraint: `LDNA` rejects `num_pred_heads >= out_channels`, so arxiv's 40 classes rule out 32 while Questions' single BCE logit does not. Questions gained 32 after its first search chose the smallest width and depth on offer (64, 2) — a value on a bound cannot be distinguished from an optimum. 256 is the widest that fits arxiv full-graph |
 | `num_layers` | `Questions` [2, 6], `ogbn-arxiv` [2, 7] | the measured k-hop covering depth + 2 (§ Datasets → node-level) |
 | LR schedule | **none** | constant LR, per § Evaluation protocol; `ReduceLROnPlateau(patience=10)` is ten *steps* here |
 | early stopping | **off** | `patience=20` is 20 steps (2% of the budget), and its calibration (2× the scheduler patience) is void with no scheduler |

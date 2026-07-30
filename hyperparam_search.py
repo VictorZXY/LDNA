@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 from collections import Counter
 from statistics import median
@@ -53,7 +54,14 @@ NODE_EDGE_ENTRIES = {'Cora': 10_556, 'Questions': 307_080, 'ogbn-arxiv': 2_315_5
 # The node-level architecture box, in ONE place: `objective` samples from it, `main` enumerates it to
 # report which points the memory prune admits, and the two must not drift apart. `Cora` is absent
 # deliberately -- it is the node path's smoke test, not a searched dataset (§ Datasets).
-NODE_WIDTHS = (64, 128, 256)
+#
+# Width is per dataset because the floor is a MODEL constraint, not a preference: `LDNA` rejects
+# `num_pred_heads >= out_channels`, so ogbn-arxiv's 40 classes rule out 32 while Questions' single
+# BCE logit does not. Questions gets 32 because its first search chose the smallest width offered
+# (64) and the smallest depth (2) -- consistent with a 24k-train-node heterophilous graph that
+# overfits hard (measured train ROC-AUC 0.9996 against validation 0.75), but a value sitting on a
+# bound cannot be told apart from an optimum without offering something below it.
+NODE_WIDTHS = {'Questions': (32, 64, 128, 256), 'ogbn-arxiv': (64, 128, 256)}
 NODE_MAX_LAYERS = {'Questions': 6, 'ogbn-arxiv': 7}
 
 
@@ -546,7 +554,8 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     node_level = dataset in NODE_DATASETS
     hidden_channels = fix_hidden_channels if fix_hidden_channels is not None \
         else trial.suggest_categorical('hidden_channels',
-                                       list(NODE_WIDTHS) if node_level else [128, 256, 512, 1024])
+                                       list(NODE_WIDTHS[dataset]) if node_level
+                                       else [128, 256, 512, 1024])
     num_layers = fix_num_layers if fix_num_layers is not None \
         else trial.suggest_int('num_layers', 2, NODE_MAX_LAYERS.get(dataset, 8))
     dropout = trial.suggest_float('dropout', 0.1, 0.7)
@@ -659,15 +668,25 @@ def main(args):
             depths = range(2, NODE_MAX_LAYERS[args.dataset] + 1)
             budget = mem_fraction * torch.cuda.get_device_properties(
                 torch.device(args.device).index).total_memory / 1024 ** 3
-            box = [(h, l) for h in NODE_WIDTHS for l in depths
+            widths = NODE_WIDTHS[args.dataset]
+            box = [(h, l) for h in widths for l in depths
                    if _node_peak_gib(args.dataset, h, l) <= budget]
             print(f"Memory-admissible (hidden_channels, num_layers) within {budget:.2f} GiB "
                   f"(mem_fraction {mem_fraction}): {len(box)} of "
-                  f"{len(NODE_WIDTHS) * len(depths)} — {box}")
+                  f"{len(widths) * len(depths)} — {box}")
             if not box:
                 raise ValueError(
                     f"No (hidden_channels, num_layers) point fits {mem_fraction} of "
                     f"{args.device}; raise --mem_fraction or use a freer card")
+
+        # Warm start: seed the study with a known-good point so the sampler begins from it instead
+        # of rediscovering it. The enqueued configuration is evaluated as trial 0 and enters the TPE
+        # observation set immediately, which is what lets a re-run use far fewer trials than the
+        # search that produced it.
+        if args.enqueue:
+            params = json.loads(args.enqueue)
+            print(f"Enqueued starting point: {params}")
+            study.enqueue_trial(params)
 
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
@@ -713,6 +732,8 @@ if __name__ == '__main__':
     # Left unset it resolves per level in main(): 0.85 for node datasets (a node search's admissible
     # architecture box is defined by this value), 0.30 for graph-level.
     parser.add_argument('--mem_fraction', type=float, default=None)
+    # JSON dict of hyperparameters to evaluate as trial 0, e.g. a previous search's best config.
+    parser.add_argument('--enqueue', type=str, default=None)
     # Left unset the cap resolves per level in main(): 50 graph-level epochs, or NODE_SEARCH_EPOCHS
     # on the node-level datasets, where one epoch is one optimizer step.
     parser.add_argument('--epochs', type=int, default=None)
