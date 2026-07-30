@@ -1,0 +1,45 @@
+experiment_name: ldna_questions_h256l5
+
+# Tuned candidate B: the second search's pick (50 trials, widths {32,64,128,256}, warm-started).
+# The two Questions searches chose near-opposite architectures for validation scores 0.0045 apart
+# -- far inside the ~0.017 spread a single run carries -- so the architecture axis is flat here and
+# the choice cannot be made from search scores alone. Both candidates are run over the 10 official
+# splits to decide it on paired evidence, and to expose how each overfits: Questions has 24,460
+# training nodes and this model reached train ROC-AUC 0.9996 in earlier probes.
+#
+# No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse
+# stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
+# No `scheduler` key: the node path trains at a constant LR (see .claude/experiments.md
+# § Evaluation protocol); a YAML null would arrive as the string 'None' and be rejected.
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 5
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.667468
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: Questions
+data_args:
+  root: data/questions/
+
+# Training specific arguments/hyperparameters
+cuda: 2
+mem_fraction: 0.30
+seed: 42
+train_args:
+  runs: 10
+  epochs: 1000
+  eval_interval: 100
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 3.794867e-3
+    weight_decay: 5.3e-6
+  evaluator: ROCAUCEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
