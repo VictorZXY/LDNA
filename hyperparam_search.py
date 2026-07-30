@@ -1,6 +1,8 @@
 import argparse
 import json
+import logging
 import os
+import sys
 from collections import Counter
 from statistics import median
 
@@ -621,6 +623,16 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
 def main(args):
     log_path = os.path.join(args.log_dir, f'search_{args.dataset}.txt') if args.log_dir is not None else None
     with tee_to_file(log_path):
+        # Optuna's default handler binds the `sys.stderr` OBJECT at import time, so `tee_to_file`
+        # rebinding the name afterwards never reaches it: every per-trial line went to the real
+        # stderr and the tee'd log held only this function's own prints. Re-pointing the handler at
+        # the current stderr makes the kept `.txt` self-contained, which is what the log-retention
+        # convention assumes (§ Evaluation protocol).
+        optuna.logging.disable_default_handler()
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(optuna.logging.create_default_formatter())
+        optuna.logging.get_logger('optuna').addHandler(handler)
+
         settings = _get_study_settings(args.dataset)
 
         # Epoch cap, resolved per level unless the CLI names one: a node-level epoch is a single
