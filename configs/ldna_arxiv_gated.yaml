@@ -1,0 +1,43 @@
+experiment_name: ldna_arxiv_gated
+
+# NOT TUNED -- a hand-picked starting point, pending the node-level Optuna search. The width, depth
+# and dropout are the standard OGB full-graph settings for arxiv rather than a searched optimum;
+# `num_layers: 3` sits inside the measured range for arxiv ([2, 7], see .claude/experiments.md
+# § Datasets → node-level), whose upper end is bounded by full-graph memory, not by the data.
+#
+# No `readout` key: the resolver sets readout=None for node-level datasets, since configargparse
+# stringifies nested model_args and a YAML `readout: null` would arrive as the string 'None'.
+model: LDNA
+model_args:
+  hidden_channels: 128
+  out_channels: 128
+  num_layers: 3
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.486877
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: ogbn-arxiv
+data_args:
+  root: data/
+
+# Training specific arguments/hyperparameters
+cuda: 3
+mem_fraction: 0.45
+seed: 42
+train_args:
+  runs: 10
+  epochs: 2000
+  eval_interval: 200
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.00118411
+    weight_decay: 1.58215e-5
+  evaluator: OGBNodeEvaluator
+  evaluator_kwargs:
+    name: ogbn-arxiv
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
