@@ -25,7 +25,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 - LDNA is the method studied here. It sorts graph inputs into a canonical order before model execution, then trains a learnable neighborhood aggregation model implemented in code as `LDNA` and `LDNAConv`.
 - The repository is centered on running experiments rather than packaging a reusable library. It compares LDNA against several baseline GNN families under the same general training pipeline.
 - The project runs in a Conda environment named `LDNA`.
-- All reported experiments are graph-level. Node-level (transductive, per-node) prediction is implemented but not yet reported: only the full-graph `Cora` smoke test, `Questions` (diagnostics only) and `ogbn-arxiv` are wired, and sampling, layer-wise inference, and the remaining node datasets are still to come.
+- Graph-level and synthetic-expressiveness experiments are complete. Node-level (transductive, per-node) prediction is wired and **ranked on `Questions`** (LDNA 3rd of 11) with `ogbn-arxiv` tuned; `Cora` remains a smoke test. The headline node-level finding is that LDNA's rank gate contributes nothing there — the canonical rank is a deterministic function of a node's own feature row, so the gap δ carries no information the message MLP does not already receive, where at graph level the within-graph rank encodes graph context. Measurements, the two corrections they forced, and the recorded evidence gap in the graph-level case are in `.claude/experiments.md` § Results log. Sampling, layer-wise inference and the remaining node datasets are still to come.
 
 ---
 

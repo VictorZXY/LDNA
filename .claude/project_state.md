@@ -108,8 +108,16 @@
   The gate ablation (`rank_mode: none`, identical parameter count / RNG stream / per-run initial
   weights) is **null on both datasets**, and on arxiv it is null where the train–val gap is only
   0.068 — i.e. with generalisation headroom left — while the paired TRAIN difference is
-  significantly positive. The mechanism runs and adds fitting capacity; it just buys no
-  generalisation. Full numbers and disclosures in `.claude/experiments.md` § Results log.
+  significantly positive — and validation is significantly WORSE (−0.00088 ± 0.00061). The
+  mechanism runs and adds fitting capacity; it buys no generalisation and costs a little.
+  **Why, measured (2026-08-03):** `H(δ | x_i, x_j)` is **0.000 bits** at node level against
+  2.14/4.49/1.69 at graph level — `node_rank` ranks within one fixed global multiset, so δ is a
+  deterministic function of the message MLP's own input, whereas the graph-level rank is computed
+  within each graph and so encodes graph context. LDNA's 3rd place is then a kernel property, not
+  a gate one: `Questions` is degree-driven (median degree 1; features + log-degree alone reach
+  0.7490) and what predicts the ranking is whether a kernel preserves neighbourhood size
+  (Spearman +0.888). Three hypotheses were tested and refuted — self-dilution growing with
+  degree, overfitting speed, and heterophily-specific machinery. Full numbers and disclosures in `.claude/experiments.md` § Results log.
   This is a contrast with graph level, where the same aggregator beat its predecessor on all five
   datasets and reaches BREC 321. The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
   already gives the node-level ranking picture and the ablation explains it.
