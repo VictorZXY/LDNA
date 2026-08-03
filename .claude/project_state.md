@@ -102,6 +102,17 @@
   dense `N × N` adjacency, infeasible at 48,921 nodes, and the `NODE_DATASETS` branch never
   attaches the field — so node level ranks LDNA plus ten baselines, not eleven. All eleven
   configs verified to build and run a forward+backward producing `[48921, 1]`.
+- **Node-level result (2026-08-02): the rank gate does not transfer.** Questions is fully wired
+  and ranked (LDNA **#3 of 11**, significantly behind GIN and GNN-VPA); ogbn-arxiv is tuned
+  (100 trials, best val 0.7040, optimum interior on every axis and unimproved for 85 trials).
+  The gate ablation (`rank_mode: none`, identical parameter count / RNG stream / per-run initial
+  weights) is **null on both datasets**, and on arxiv it is null where the train–val gap is only
+  0.068 — i.e. with generalisation headroom left — while the paired TRAIN difference is
+  significantly positive. The mechanism runs and adds fitting capacity; it just buys no
+  generalisation. Full numbers and disclosures in `.claude/experiments.md` § Results log.
+  This is a contrast with graph level, where the same aggregator beat its predecessor on all five
+  datasets and reaches BREC 321. The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
+  already gives the node-level ranking picture and the ablation explains it.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
   so runs are independent for LDNA and every baseline alike, applied in the caller with no
