@@ -36,7 +36,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 - `MNISTSuperpixels`: graph-level multi-class classification.
 - `Cora` (Planetoid): node-level multi-class classification, transductive full-graph. A smoke test for the node-level path, not a reported result.
 - `Questions` (HeterophilousGraphDataset): node-level binary classification (ROC-AUC), transductive full-graph, heterophilous; its 10 official split masks map to `runs` the way the EXP/CEXP folds do. Currently used for the gate-ablation diagnostic (config pair `ldna_questions_{gated,ungated}.yaml`), not yet a reported result.
-- `ogbn-arxiv`: node-level 40-class classification (accuracy), transductive full-graph, OGB time split. The citation edges are symmetrized with `T.ToUndirected()` for every model, and the OGB split index tensors are converted to boolean node masks. Wired with an untuned config (`ldna_arxiv.yaml`) pending the node-level search; no reported runs yet.
+- `ogbn-arxiv`: node-level 40-class classification (accuracy), transductive full-graph, OGB time split. The citation edges are symmetrized with `T.ToUndirected()` for every model, and the OGB split index tensors are converted to boolean node masks. Tuned by a 100-trial search and used for the decisive gate ablation; the 11-model ranking was deliberately not run (see `.claude/experiments.md` § Implementation queue).
 
 ---
 
@@ -55,7 +55,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 ## Repo architecture
 
 - `train.py`: main training entry point.
-- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports all five graph-level datasets (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`) and the two wired node-level ones (`Questions`, `ogbn-arxiv`). The node path differs wherever a setting is counted in epochs, since a full-graph epoch is one optimizer step: no LR schedule, no early stopping, a 333-step cap, best-epoch trial scoring, and a memory-feasibility prune (see `.claude/experiments.md` § Search spaces). The expressiveness datasets deliberately have no search (their hyperparameters are protocol constants).
+- `hyperparam_search.py`: a single generic Optuna search over LDNA hyperparameters; supports all five graph-level datasets (`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`) and the two wired node-level ones (`Questions`, `ogbn-arxiv`). The node path differs wherever a setting is counted in epochs, since a full-graph epoch is one optimizer step: no LR schedule, no early stopping, no search cap (a trial runs the dataset's full budget), a trial scored by the best rolling median rather than the last-five median, and a memory-feasibility prune (see `.claude/experiments.md` § Search spaces). The expressiveness datasets deliberately have no search (their hyperparameters are protocol constants).
 - `models/`: LDNA model code (`ldna_conv.py`, `ldna_net.py`), the shared node-feature `Encoder` (`encoder.py`), and baseline GNN model wrappers.
 - `data_utils/`: dataset-side code — `preprocess.py` (graph sorting/canonicalization, the node-level canonical rank, DGN eigenvector field, degree histogram), `transforms.py` (small transforms), `exp.py` (EXP/CEXP dataset), `brec.py` (BREC dataset + RPC evaluation core), `code2.py` (ogbg-code2 target-sequence utilities). Its `__init__.py` carries the torch>=2.6 `torch.load` compatibility shim.
 - `utils/resolver.py`: loads datasets, applies preprocessing, and builds the requested model.
