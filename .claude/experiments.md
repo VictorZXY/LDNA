@@ -56,15 +56,43 @@ with the reason recorded at the section that owns it.
 | `ZINC` | graph regression | MAE | min | `ZINCEvaluator` | done | wired; configs; search uses `subset=True` (~10k), final training uses full ZINC |
 | `MNISTSuperpixels` | 10-way classification | accuracy | max | `MNISTEvaluator` | done | wired; configs. **Its validation split IS its test split** — `utils/resolver.py` assigns `val_dataset = test_dataset = MNISTSuperpixels(train=False, …)`, since the dataset ships no separate validation set. Every MNIST log therefore has val ≡ test to the last digit for every model, run and epoch. Harmless for the ranking (identical for all models) but it means MNIST has no held-out selection signal, so its best-over-epochs figure is selected on the same split it reports |
 | `ogbg-code2` | AST subtoken prediction | F1 | max | `Code2Evaluator` (OGB F1) | done | **edge-less** (GIN family, no `edge_attr`); dedicated seq-head (5×5002) + sum-over-position CE loss + decode→F1 eval + train-split vocab pre-pass; skip lexsort (AST DFS order is canonical). `num_nodetypes=98`, `num_nodeattributes=10030` |
+| `Peptides-func` | 10-task multi-label | AP | max | `OGBGraphPropPredEvaluator`-style AP (new) | todo | **PLANNED.** `LRGBDataset(name='Peptides-func')`. ~15.5k graphs, ~150 nodes, atom-level features and bond `edge_attr` — so the feature lexsort applies unchanged and this is a **GINE** dataset. The point is the **long-range axis**, which none of the current five has: peptide chains have large diameter and the label depends on dependencies many hops apart. LRGB is the standard long-range benchmark since 2022 (GraphGPS, Exphormer, GRIT all report on it), so the numbers are citable |
+| `Peptides-struct` | 11-target regression | MAE | min | `ZINCEvaluator`-style MAE (new, multi-target) | todo | **PLANNED.** Same loader and same graphs as `Peptides-func`, different targets. Adds **multi-target regression**, which the suite also lacks — `ZINCEvaluator` handles one target, so this needs a multi-target MAE variant (mean over the 11 normalized targets, per the LRGB protocol) |
+| `CIFAR10` (superpixels) | 10-way classification | accuracy | max | `MNISTEvaluator` | todo | **PLANNED.** `GNNBenchmarkDataset(name='CIFAR10')`, the direct sibling of `MNISTSuperpixels` — same superpixel construction, same pipeline (`T.Cartesian` + `RemoveEdgeAttr`), harder task. It adds no new structural axis; it is here because the benchmarking-gnns suite is expected complete and a MNIST row without a CIFAR10 row is conspicuous. **Check whether it ships a real validation split** — MNIST's does not (see its row), and if CIFAR10's does not either, that has to be disclosed the same way |
+| `ogbg-ppa` | 37-way classification | accuracy | max | `OGBGraphPropPredEvaluator` | todo | **PLANNED — readmitted via nauty.** 158,100 graphs, ~243 nodes / ~2,266 edges each, **no node features**, 7-dim `edge_attr` (so **GINE**). It was removed in 2026-07-07 (note below) because the feature lexsort cannot impose a permutation-invariant order without node features. A **nauty canonical labelling** removes exactly that blocker — the same device already used for EXP/CEXP/BREC — via `canonicalize_graphs` + `rank_mode: position`. Measured feasibility: ~0.022 s per graph at this size and density, i.e. **~1 CPU-hour once** for the full set, and cacheable. See the readmission note below for what this does and does not buy |
 
-> **`ogbg-ppa` removed from scope** (2026-07-07): ppa has no node features, so the feature-based
-> canonical sort cannot impose a **permutation-invariant** node order (identical features → the
-> sort falls back to input order). LDNA *requires* a canonical order so its MLP aggregator is
-> permutation invariant (the sort is a correctness requirement, **not** a performance booster —
-> LDNA's gain comes from the aggregator). Giving ppa a well-defined order needs a bespoke rule;
-> not worth it given the four graph-level datasets already cover binary / multi-task / regression /
-> multi-class. `ogbg-code2` is kept: its AST nodes have a natural DFS order (permutation invariant),
-> so LDNA works there by using that order directly (skip the feature lexsort).
+> **`ogbg-ppa`: removed 2026-07-07, readmitted 2026-08-04 via a nauty canonical labelling.**
+> The original reason for removing it stands and is worth restating, because it is a *correctness*
+> reason and not a performance one: ppa has no node features, so the feature-based canonical sort
+> cannot impose a **permutation-invariant** node order (identical features → the sort falls back to
+> input order), and LDNA *requires* a canonical order for its MLP aggregator to be permutation
+> invariant. The sort is a correctness requirement, **not** a performance booster.
+>
+> What changed is that the project has since built and validated the device that supplies such an
+> order without features: `data_utils/preprocess.py: canonicalize_graph(s)` (pynauty), used for
+> EXP/CEXP/BREC, read by LDNA through `rank_mode: position`. Isomorphic graphs get the identical
+> labelled form, so invariance is exact. Measured cost at ppa's size and density (~243 nodes, mean
+> degree ~18.6): **0.022 s per graph, ≈1 CPU-hour for all 158,100**, dominated by the Python-side
+> adjacency build rather than by nauty itself, and cacheable in the dataset's `processed_dir` the
+> way `add_eig_vecs` already caches the DGN field.
+>
+> **What this buys, honestly.** It restores a dataset excluded on correctness grounds and adds the
+> suite's only **featureless** entry, which demonstrates that LDNA's canonical-order premise does
+> not depend on node features existing. It is **not** a prediction of a performance gain, and the
+> project's own measurements cut both ways. In favour: ppa has no node features at all, so the
+> signal is structural to begin with and a structure-derived order is not displacing a semantically
+> primary quantity — unlike ZINC, where 1-WL refinement lost 0.0048 precisely because it replaced
+> atom type (correlating +0.82 with the endpoint chemistry) with a chemically arbitrary ordering.
+> Against: a canonical labelling still imposes an arbitrary total order among structurally
+> distinguished nodes, and BREC — the one place nauty demonstrably helps — has a task that *is*
+> isomorphism distinguishing, whereas ppa's is classification. Neutral but real: δ also carries
+> graph size, which attention pooling normalises away (measured `R²(δ ~ 1/graph_size) = 0.545` on
+> ZINC), and ppa's size distribution is wide.
+>
+> **De-risking option before committing the ~1 CPU-hour and the full ranking**: `MalNetTiny`
+> (5k function-call graphs, also featureless, used by GraphGPS and Exphormer) exercises the same
+> nauty + `rank_mode: position` path at a fraction of the cost. If the path misbehaves there it
+> will misbehave on ppa.
 
 ### 2. Node-level prediction
 
@@ -761,6 +789,52 @@ node-level needs new infrastructure; expressiveness needs custom evaluation).
       inference infrastructure existed only to reach those datasets, so it goes with them. Node
       level is reported as a measured boundary condition, not as a benchmark sweep.
 
+**Graph-level expansion (planned 2026-08-04 — the suite's gaps are long-range, multi-target
+regression, and featureless graphs; these four close all three):**
+
+> **A criterion for judging any future graph-level dataset, from this project's own measurements.**
+> The canonical rank is useful only when it carries information the message MLP does not already
+> receive, and at graph level that holds structurally (the rank is computed within each graph, so it
+> encodes graph context — `H(δ | x_i, x_j)` is 2.14 bits on ZINC, 4.49 on molhiv, 1.69 on MNIST,
+> against 0.000 at node level). But the *quality* of that signal depends on the feature layout:
+> `np.lexsort` makes the LAST feature column primary, so a single low-dimensional categorical
+> column recodes a semantically primary quantity losslessly (ZINC's atom type, correlating +0.82
+> with the endpoint chemistry), while a high-dimensional continuous embedding degenerates the order
+> into the percentile of one arbitrary coordinate (measured at node level: `Spearman(rank, last
+> column) = 1.000000` on arxiv, where that column is 123rd of 128 by variance). **Prefer graph-level
+> datasets with low-dimensional, semantically meaningful node features** — which is why `Peptides`
+> and `CIFAR10` are the safe additions, and why any future candidate carrying learned continuous
+> node embeddings deserves this check before it is wired.
+
+- [ ] **`CIFAR10` superpixels** — the smallest diff, do it first. `GNNBenchmarkDataset(name='CIFAR10')`
+      in `utils/resolver.py`, reusing the `MNISTSuperpixels` branch verbatim (`T.Cartesian` +
+      `RemoveEdgeAttr`, `sort_graphs`, `MNISTEvaluator`, `nn.Linear(num_features, hidden)` encoder).
+      **Check its split**: MNIST has no validation set and the resolver silently aliases val to test
+      (see its dataset row); confirm whether CIFAR10 does the same and disclose it if so. Edge-less
+      after `RemoveEdgeAttr`, so **GIN**, not GINE.
+- [ ] **`Peptides-func` and `Peptides-struct`** — `LRGBDataset(name=...)`, one resolver branch
+      covering both since they share graphs and differ only in targets. Atom-level node features and
+      bond `edge_attr`, so the existing feature lexsort and the `models.Encoder` / `nn.Embedding`
+      encoder pattern apply as they do for ZINC — **GINE**. Two new evaluators: multi-label **AP**
+      for `-func` (the OGB AP computation over 10 tasks) and **multi-target MAE** for `-struct`
+      (mean over the 11 targets, normalized per the LRGB protocol — read the protocol, do not
+      invent the normalization). `BCEWithLogitsLoss` and `L1Loss` respectively.
+- [ ] **`ogbg-ppa` via nauty** — the only one needing a new mechanism. `PygGraphPropPredDataset`
+      + `canonicalize_graphs` in place of `sort_graphs`, and LDNA reads the order via
+      `rank_mode: position` (as on `ogbg-code2`). Four things to get right, each of which has
+      already bitten this project once:
+      1. **Cache the canonicalization.** ~1 CPU-hour otherwise repeated on every job start, and a
+         ranking launches 11+ processes. Follow `add_eig_vecs`' sidecar pattern in
+         `processed_dir`, keyed by a digest of the connectivity so a revised ordering rule
+         invalidates it rather than silently misaligning.
+      2. **Ordering constraint.** DGN's `eig_vec` must be attached AFTER canonicalization (which
+         permutes nodes) and BEFORE any index slicing (an index view cannot be re-collated) — the
+         same constraint the other OGB branches already document.
+      3. **`rank_mode: position` is mandatory** for LDNA here, exactly as the ZINC `canonical`
+         experiment found: a feature-mode rank over a canonically-ordered featureless graph is a
+         silent no-op, not an error. Guard it the way that experiment did.
+      4. **GINE, not GIN** — ppa has 7-dim `edge_attr`; do not strip it.
+
 **Expressiveness (custom evaluation):**
 
 - [x] Add `EXP` / `CEXP` (ported dataset + the paper's 10-fold CV; `AccuracyEvaluator`).
@@ -781,6 +855,25 @@ the results log.
 shared config to all baselines → run → rank → append to § Results log): **complete on all
 five datasets** — `ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2` —
 plus the `DGN` baseline added afterward. Final rankings in § Results log.
+
+**Graph-level expansion (planned 2026-08-04).** Per § Tuning methodology, each dataset runs the
+standard protocol: tune LDNA → `scripts/broadcast.py` the tuned shared config to every baseline →
+run → rank → append a § Results log row. Suggested order, cheapest and lowest-risk first:
+
+- [ ] `CIFAR10` — pipeline already exists; the only work is the resolver branch and the configs.
+- [ ] `Peptides-func`, then `Peptides-struct` — new evaluators, but the sort and encoders are the
+      ZINC pattern. These are the two that close the **long-range** gap, so they carry the most
+      weight for the paper and should not be cut first if the budget shrinks.
+- [ ] `ogbg-ppa` — do last: it needs the nauty path, the cache, and the largest compute
+      (158,100 graphs). Consider the `MalNetTiny` de-risking run first (see its note in § Datasets).
+
+Two things to decide before running, not while running. **`batch_size` is a fixed per-dataset
+power of two** chosen so steps/epoch lands ~100–300 (§ Search spaces) — set it from each dataset's
+train size before the search, not after. And **DGN needs a directional field on each new dataset**:
+the Laplacian eigenvector path applies to all four (all are small-graph, connected-component
+decomposable), but check the disconnected-graph fraction as was done for molhiv (7.5%), since the
+field vanishes on every edge of a graph whose lowest non-trivial eigenvectors degenerate into
+component indicators.
 
 **Batch 3 — synthetic expressiveness** (protocol in § Datasets → batch-3 notes; no search,
 no broadcast — the three configs per dataset are the protocol). **Complete 2026-07-28**;
