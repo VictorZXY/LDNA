@@ -663,13 +663,19 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
   applied to **completed** runs only; live runs still write flat to `out/logs/` and are archived
   when they finish. Ranking analysis reads pickles from `out/logs/ranking/*/` (with a flat
   `out/logs/` fallback for a just-finished, not-yet-archived config).
-  **Exploratory runs are filed separately, under `out/logs/explore/<topic>/`**, never mixed into
-  `ranking/<dataset>/`. Anything in `ranking/` is part of a reported model-vs-model comparison
-  under the shared config; a probe, an ablation arm or an abandoned variant is not, and mixing the
-  two makes the ranking folder unreadable as the thing it is. `search/` stays its own folder
-  rather than moving under `explore/`: a search is a protocol step whose output — the tuned
-  config — is committed and cited by every ranking row, so it is a permanent record, while
-  `explore/` holds work that may be discarded outright.
+  **`out/logs/` has four folders, by what the artifact IS rather than by when it was produced.**
+  `ranking/<dataset>/` — reported model-vs-model comparisons under the shared config, one folder
+  per dataset. `search/` — hyperparameter searches; a permanent record, since the tuned config it
+  produces is committed and cited by every ranking row. `ablation/<mechanism>/` — reported
+  method-internal comparisons, where the arms are the same model with one component varied
+  (currently `ablation/gate/`, the four gate-ablation runs across both node datasets; they belong
+  together as one experiment rather than split by dataset). `explore/<topic>/` — probes,
+  candidate comparisons and abandoned variants, i.e. work that may be discarded outright.
+  Nothing is filed flat at the root once its run has finished.
+
+  Two pre-existing exceptions are left as they are rather than moved, because their paths are
+  cited in § Results log rows: `ranking/brec/gateinit_probe/` (a probe) and the two
+  `*_no_canonical` BREC arms (an ablation), both under `ranking/brec/`.
 
 ---
 
