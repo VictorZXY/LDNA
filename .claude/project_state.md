@@ -18,8 +18,10 @@
   (Questions, ogbn-arxiv). Search mechanics — ranges, pruning, plateau early-stopping, the
   50-epoch search cap (vs 150 final), and gradient clipping — live in
   `.claude/experiments.md` (§ Search spaces), together with the node-level space, whose
-  epoch-counted settings all differ because a full-graph epoch is one optimizer step
-  (no schedule, no early stopping, a 333-step cap, best-epoch scoring, memory prune).
+  epoch-counted settings all differ because a full-graph epoch is one optimizer step: no LR
+  schedule, no early stopping, no search cap (a trial runs the dataset's full budget), a trial
+  scored by the best rolling median rather than the last-five median, and a memory-feasibility
+  prune on the (width, depth) box.
 - `readout` (incl. `attention` = `AttentionalAggregation`) and a per-layer `residual` flag
   are shared knobs supported by every model family (all configs use `readout: attention` +
   `residual: true`); the resolver unifies every model's encoder width to `hidden_channels`, so
@@ -80,18 +82,15 @@
   split-mask columns become 10 per-split shallow `Data` copies sharing x/edge_index/y/nrank,
   riding the train_loader as `cv_folds` the way the EXP/CEXP folds do). `rank_mode: none` is the
   ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
-  sum-of-messages aggregator), paired with the hand-picked, untuned gate-ablation configs
-  `ldna_questions_gated.yaml` / `ldna_questions_ungated.yaml` (identical except the gate; not
-  run yet). `ogbn-arxiv` is wired full-graph (`configs/ldna_arxiv.yaml`, hand-picked and untuned,
-  pending the node-level search): OGB ships split INDEX tensors, so `utils/resolver.py:
+  sum-of-messages aggregator), used by the gate-ablation config pairs on both datasets.
+  `ogbn-arxiv` is wired full-graph: OGB ships split INDEX tensors, so `utils/resolver.py:
   _idx_to_masks` turns them into the boolean `[N]` masks the rest of the node path reads and
   rejects a non-partitioning split on the spot; `T.ToUndirected()` symmetrizes the directed
   citation edges as a preprocessing choice shared by every model (169,343 nodes / 2,315,598
   undirected edge entries); `y` is flattened to `[N]` for the CrossEntropy path. Measured peak
-  GPU memory for full-graph LDNA (3 training steps, A6000): **18.33 GiB at h=128/L=3** and
-  **35.58 GiB at h=256/L=3** — ≈6.1 GiB per layer at h=128, scaling linearly in both, which is
-  what bounds the `(hidden_channels, num_layers)` box of the node-level search on a 49 GB card.
-  The sampled control is still to come.
+  GPU memory for full-graph LDNA bounds the `(hidden_channels, num_layers)` box the node-level
+  search may sample; the fitted law and its measurements are in `.claude/experiments.md`
+  (§ Datasets → node-level).
 - `Questions` has its baseline config set: ten `<model>_questions.yaml` files carrying LDNA's
   tuned shared knobs from `configs/ldna_questions.yaml` (h=64, L=2, dropout 0.616143,
   lr 4.871103e-3, wd 5.3e-6), broadcast by `scripts/broadcast.py`, which learned the dataset via
@@ -107,9 +106,10 @@
   (100 trials, best val 0.7040, optimum interior on every axis and unimproved for 85 trials).
   The gate ablation (`rank_mode: none`, identical parameter count / RNG stream / per-run initial
   weights) is **null on both datasets**, and on arxiv it is null where the train–val gap is only
-  0.068 — i.e. with generalisation headroom left — while the paired TRAIN difference is
-  significantly positive — and validation is significantly WORSE (−0.00088 ± 0.00061). The
-  mechanism runs and adds fitting capacity; it buys no generalisation and costs a little.
+  0.068 — i.e. with generalisation headroom left. The paired TRAIN difference there is
+  significantly POSITIVE (+0.00683 ± 0.00131) while validation is significantly WORSE
+  (−0.00088 ± 0.00061): the mechanism runs and adds fitting capacity, buys no generalisation,
+  and costs a little.
   **Why, measured (2026-08-03):** `H(δ | x_i, x_j)` is **0.000 bits** at node level against
   2.14/4.49/1.69 at graph level — `node_rank` ranks within one fixed global multiset, so δ is a
   deterministic function of the message MLP's own input, whereas the graph-level rank is computed
@@ -189,10 +189,15 @@
 
 ## Partial or missing components
 - `README.md` is a title stub; it does not explain the project or its setup/usage.
-- Node-level support covers only the full-graph transductive case on `Cora`, `Questions` and
-  `ogbn-arxiv`. Sampling (GraphSAINT, including arxiv's sampled control), layer-wise exact
-  inference, the remaining datasets (PPI, ogbn-products, Reddit), and the tune → broadcast → rank
-  protocol are not implemented yet.
+- Node-level support covers the full-graph transductive case only (`Cora`, `Questions`,
+  `ogbn-arxiv`). **The rest of the node-level programme was dropped**, not deferred: sampling
+  (GraphSAINT), layer-wise exact inference, `PPI` / `ogbn-products` / `Reddit`, and the arxiv
+  11-model ranking. The measured reason is that LDNA's distinguishing mechanism cannot work in
+  this regime — the canonical rank is a deterministic function of a node's own feature row, so
+  `H(δ | x_i, x_j) = 0` and the gate has nothing to condition on (§ Results log). Two datasets
+  spanning heterophilous binary and homophilous 40-class already establish that, and the
+  remaining datasets would cost 50–200 GPU-h each to reconfirm it. Node level is reported as a
+  measured boundary condition rather than as a benchmark sweep.
 
 ---
 
@@ -210,7 +215,16 @@
   `node_encoder=nn.Linear(1, emb)`. Left alone deliberately: BREC's committed 321 is the headline
   result, the protocol is init-sensitive (the whole point of `gate_init_std`), and changing the
   code without re-running would leave that number unreproducible. Decide before any BREC re-run.
-- Test LDNA performance on node-level predictions.
+- **Single-factor graph-level gate ablation — the one measurement the project still owes.**
+  Commit `2278661` added the rank gate and removed `lin_aggr` in the same change, so the
+  graph-level result compares {gate, no lin_aggr} against {no gate, lin_aggr} and never isolated
+  the gate; no graph-level config has run `rank_mode: none`. The node-level ablation is the only
+  single-factor one, and it is null. Running `rank_mode: none` against `feature` at the committed
+  tuned configs on ZINC / MNIST / molhiv (3+ runs, identical seeds) would settle what the gate
+  contributes at graph level. It is **not** required for the performance claim — the rankings
+  compare LDNA against baselines under identical configs whatever is inside LDNA — but it is
+  required before describing the gate as the mechanism behind those rankings. Details and the
+  parameter-count evidence are in `.claude/experiments.md` (the EVIDENCE GAP note above § Results log).
 - Test LDNA performance as a standalone aggregator component on other methods.
 
 ---
