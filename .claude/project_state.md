@@ -23,8 +23,9 @@
   scored by the best rolling median rather than the last-five median, and a memory-feasibility
   prune on the (width, depth) box.
 - `readout` (incl. `attention` = `AttentionalAggregation`) and a per-layer `residual` flag
-  are shared knobs supported by every model family (all configs use `readout: attention` +
-  `residual: true`); the resolver unifies every model's encoder width to `hidden_channels`, so
+  are shared knobs supported by every model family (`residual: true` everywhere; every
+  graph-level and expressiveness config uses `readout: attention`, while the node-level configs
+  carry no `readout` key at all — the resolver sets `readout=None` for them); the resolver unifies every model's encoder width to `hidden_channels`, so
   the conv stack is uniform. Projection-skip and `DeeperGCN`-`res+` details are in
   `.claude/experiments.md` § Tuning methodology.
 - Both `train.py` and `hyperparam_search.py` tee each run under `out/logs/` (`utils/tee.py`)
@@ -41,8 +42,10 @@
   datasets whose node order is canonical by construction — code2's AST DFS order; used by
   `configs/ldna_code2_rankgate.yaml`). This rank-gated design is the current official LDNA —
   the outcome of the escalation, superseding the earlier plain summed-linear-map aggregator;
-  it has been rerun with the previously tuned shared params on all five graph-level datasets
-  (results in `.claude/experiments.md` § Results log).
+  it was rerun with the previously tuned shared params on all five graph-level datasets, where it
+  improved four (ZINC 0.0903→0.0856, molhiv 0.7867→0.7923, MNIST 0.9357→0.9410, code2
+  0.1765→0.1850) and **regressed significantly on molpcba** (AP 0.2834→0.2795, a 0.0040 drop
+  against a 0.0032 sum-of-SEM threshold). Results in `.claude/experiments.md` § Results log.
 - Baselines: `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN`,
   `GNN-VPA` (`models/vpa.py`), and `DGN` (`models/dgn.py`). `GIN` xor `GINE` runs per dataset by
   edge availability. Per-model backbones, `DGN`'s directional aggregators, and the GIN/GINE rule
@@ -118,8 +121,9 @@
   0.7490) and what predicts the ranking is whether a kernel preserves neighbourhood size
   (Spearman +0.888). Three hypotheses were tested and refuted — self-dilution growing with
   degree, overfitting speed, and heterophily-specific machinery. Full numbers and disclosures in `.claude/experiments.md` § Results log.
-  This is a contrast with graph level, where the same aggregator beat its predecessor on all five
-  datasets and reaches BREC 321. The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
+  This is a contrast with graph level, where the same aggregator improved four of the five
+  datasets (and regressed on molpcba) and reaches BREC 321 — though see the EVIDENCE GAP note in
+  `.claude/experiments.md`: that graph-level comparison is two-factor and never isolated the gate. The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
   already gives the node-level ranking picture and the ablation explains it.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
@@ -127,8 +131,10 @@
   baseline model file touched. It reproduces each encoder's construction-time init distribution
   (`Encoder`/`ASTNodeEncoder` define Xavier `reset_parameters`; OGB's `AtomEncoder`/`BondEncoder`
   are re-initialized explicitly since the ogb package defines no reset method).
-  `scripts/train_fold.py` was already clean (it rebuilds per seed); `data_utils/brec.py` has the
-  same pattern and is deliberately left alone — see § Open questions.
+  `scripts/train_fold.py` was already clean (it rebuilds per seed). `data_utils/brec.py` carries
+  the same gap and is **deliberately left alone**: BREC's committed 321 is a headline result, its
+  protocol is init-sensitive (that is the whole point of `gate_init_std`), and changing the code
+  without re-running would leave that number unreproducible. Revisit only if BREC is ever re-run.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -155,7 +161,7 @@
 - Synthetic-expressiveness batch (EXP/CEXP + BREC) is **complete**. Headline: LDNA breaks the
   1-WL ceiling (EXP 1.00 / CEXP 1.00 / BREC **321** official — the `gate_init_std: 0.1`
   gate-init variant, with zero-init 138 kept alongside) while GIN sits on it exactly
-  (0.50 / 0.75 / 0) and DGN saturates EXP/CEXP and scores BREC **145** official (273 under
+  (EXP 0.5000 exactly, CEXP 0.7492 ≈ the theoretical 0.75, BREC 0) and DGN saturates EXP/CEXP and scores BREC **145** official (273 under
   shared canonicalization). BREC scores are **best across the 10 protocol seeds**, the benchmark's
   own convention (revised 2026-07-29 from mean-only, which understated us against every published
   entry; means are kept alongside in `.claude/experiments.md`). These datasets are featureless, so
@@ -187,7 +193,7 @@
 
 ---
 
-## Partial or missing components
+## Partial components, and what was deliberately left undone
 - `README.md` is a title stub; it does not explain the project or its setup/usage.
 - Node-level support covers the full-graph transductive case only (`Cora`, `Questions`,
   `ogbn-arxiv`). **The rest of the node-level programme was dropped**, not deferred: sampling
@@ -204,17 +210,13 @@
 ## Future milestones
 - Expand `README.md` to describe the project, setup, and usage.
 - Add more baseline models for experiments.
-- Add more node/graph datasets for experiments.
-- Add graph transformers implements and run them on the benchmark datasets.
+- Add more **graph-level** datasets. (Node-level is closed — see § Partial components;
+  adding node datasets would re-run a question already answered.)
+- Add graph transformer implementations and run them on the benchmark datasets.
 
 ---
 
 ## Open questions
-- Should `data_utils/brec.py` get the same encoder reset as `train.py`? Its per-pair
-  `reset_parameters()` has the identical gap, and its backbone carries
-  `node_encoder=nn.Linear(1, emb)`. Left alone deliberately: BREC's committed 321 is the headline
-  result, the protocol is init-sensitive (the whole point of `gate_init_std`), and changing the
-  code without re-running would leave that number unreproducible. Decide before any BREC re-run.
 - **Single-factor graph-level gate ablation — the one measurement the project still owes.**
   Commit `2278661` added the rank gate and removed `lin_aggr` in the same change, so the
   graph-level result compares {gate, no lin_aggr} against {no gate, lin_aggr} and never isolated
