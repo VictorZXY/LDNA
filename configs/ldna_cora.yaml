@@ -24,7 +24,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: Cora
 data_args:
-  root: data/cora/
+  root: data/
 
 # Training specific arguments/hyperparameters
 cuda: 0

@@ -22,7 +22,7 @@ model_args:
 # Dataset specific arguments/hyperparameters
 dataset: Questions
 data_args:
-  root: data/questions/
+  root: data/
 
 # Training specific arguments/hyperparameters
 cuda: 2
