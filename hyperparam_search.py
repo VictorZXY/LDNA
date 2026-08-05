@@ -66,6 +66,52 @@ NODE_EDGE_ENTRIES = {'Cora': 10_556, 'Questions': 307_080, 'ogbn-arxiv': 2_315_5
 NODE_WIDTHS = {'Questions': (32, 64, 128, 256), 'ogbn-arxiv': (64, 128, 256)}
 NODE_MAX_LAYERS = {'Questions': 6, 'ogbn-arxiv': 7}
 
+# Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched, because
+# it entangles with lr through the linear-scaling rule (§ Search spaces). At module scope for the
+# same reason NODE_WIDTHS is: `objective` samples against it and `main` enumerates the memory-
+# admissible box with it, and the two must not drift apart. ZINC searches on the subset (~10k
+# graphs), so a smaller batch than its full-data config. The node-level datasets train full-graph —
+# one graph is one batch — so they have none, and `_get_training_config` leaves `batch_size` out of
+# their `data_args`.
+BATCH_SIZES = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256,
+               'CIFAR10': 256, 'Peptides-func': 64, 'Peptides-struct': 64, 'ogbg-ppa': 128,
+               'ogbg-code2': 128, 'Questions': None, 'ogbn-arxiv': None}
+
+# Graph-level width choices, as a per-dataset override on the standard {128, 256, 512, 1024}.
+# `ogbg-ppa` is the one entry: a reduced protocol (100 epochs, 2 runs, {128, 256}) is what makes
+# 158,100 graphs at 611 steps/epoch affordable, and the two dropped widths are largely unreachable
+# there anyway — `_graph_peak_gib` puts h=512 at ~40 GiB and h=1024 at ~80 GiB for a depth-6 model
+# on a 128-graph batch of this density, against a 47 GiB card. Expressed as a dict with a default
+# rather than a parallel branch so that every other dataset reaches `suggest_categorical` with an
+# argument equal to the literal it used before, leaving TPE's draws at a given seed unchanged.
+GRAPH_WIDTHS = {'ogbg-ppa': (128, 256)}
+GRAPH_DEFAULT_WIDTHS = (128, 256, 512, 1024)
+
+# Predicted peak RESERVED memory for a graph-level batch, the counterpart of the node model above
+# and fit the same way: affine in depth, linear in width, linear in the number of edge entries the
+# batch carries. Only datasets in GRAPH_EDGE_ENTRIES are pruned — the molecular and superpixel sets
+# are small enough per batch that no sampled config approaches the card, while a ppa batch is two
+# orders of magnitude denser (4,532 edge entries per graph against molhiv's ~55).
+#
+# Fit on eight measured points on an A6000 (LDNA forward + backward + Adam step, ppa-shaped
+# batches): h=256/L=6 at batch 32/64/128/256 -> 5.00/9.94/19.85/39.67 GiB, h=512/L=6 batch 64 ->
+# 19.67, h=1024/L=4 batch 64 -> 27.62, h=128/L=8 batch 128 -> 13.21, h=256/L=3 batch 128 -> 11.04.
+# Those are ALLOCATED bytes; `mem_fraction` caps RESERVED, and the measured gap on the same runs is
+# 0.96-2.02 GiB. As at node level it is carried as ADDITIVE headroom at the worst observed value,
+# not as a multiplicative margin: the gap is allocator fragmentation history rather than a share of
+# the tensor budget, so scaling it would over-predict exactly where the budget is tightest. The
+# depth constants are then rounded UP so the affine form sits at or above every measured point
+# (+2.4% at L=4, +1.5% at L=6, exact at L=3 and L=8), keeping the prune conservative for the reason
+# _node_peak_gib gives: TPE scores a prune as worst and steers away, while an OOM is filtered out
+# by the study's `catch` and teaches the sampler nothing.
+GRAPH_MEM_GIB_FIXED = 0.91
+GRAPH_MEM_GIB_PER_LAYER = 1.54
+GRAPH_MEM_GIB_OVERHEAD = 2.1
+# Mean `edge_index` entries per graph, and the reference batch the constants above are normalized
+# to (128 ppa graphs, i.e. ppa's own configured batch size).
+GRAPH_EDGE_ENTRIES = {'ogbg-ppa': 4_532}
+GRAPH_MEM_REF_ENTRIES = 580_096
+
 
 def _node_peak_gib(dataset: str, hidden_channels: int, num_layers: int) -> float:
     # The prune must err CONSERVATIVE, which is the opposite of what it looks like it should do.
@@ -83,6 +129,19 @@ def _node_peak_gib(dataset: str, hidden_channels: int, num_layers: int) -> float
             * (hidden_channels / 128)
             * NODE_EDGE_ENTRIES[dataset] / NODE_EDGE_ENTRIES['ogbn-arxiv']
             + NODE_MEM_GIB_OVERHEAD)
+
+
+def _graph_peak_gib(dataset: str, hidden_channels: int, num_layers: int,
+                    batch_size: int) -> float:
+    # Same shape as _node_peak_gib and conservative for the same reason, but carried per BATCH
+    # rather than per graph: a graph-level step materializes the activations of `batch_size` graphs'
+    # worth of edges, so the size term is the batch's edge count and not the dataset's. The node
+    # constants do NOT transplant — read against these measurements they are ~10% permissive, which
+    # is the wrong direction for a prune whose whole purpose is to err safe.
+    return ((GRAPH_MEM_GIB_FIXED + GRAPH_MEM_GIB_PER_LAYER * num_layers)
+            * (hidden_channels / 128)
+            * (batch_size * GRAPH_EDGE_ENTRIES[dataset]) / GRAPH_MEM_REF_ENTRIES
+            + GRAPH_MEM_GIB_OVERHEAD)
 
 
 def _get_study_settings(dataset: str) -> dict:
@@ -103,6 +162,26 @@ def _get_study_settings(dataset: str) -> dict:
             'best_value_label': 'Best Validation MAE',
         }
     elif dataset == 'MNISTSuperpixels':
+        return {
+            'direction': 'maximize',
+            'best_value_label': 'Best Validation Accuracy',
+        }
+    elif dataset == 'CIFAR10':
+        return {
+            'direction': 'maximize',
+            'best_value_label': 'Best Validation Accuracy',
+        }
+    elif dataset == 'Peptides-func':
+        return {
+            'direction': 'maximize',
+            'best_value_label': 'Best Validation AP',
+        }
+    elif dataset == 'Peptides-struct':
+        return {
+            'direction': 'minimize',
+            'best_value_label': 'Best Validation MAE',
+        }
+    elif dataset == 'ogbg-ppa':
         return {
             'direction': 'maximize',
             'best_value_label': 'Best Validation Accuracy',
@@ -198,6 +277,74 @@ def _get_training_config(
             },
             'loss_query': 'CrossEntropyLoss',
             'evaluator_query': 'MNISTEvaluator',
+            'evaluator_kwargs': {},
+            'scheduler_mode': 'max',
+        }
+    elif dataset == 'CIFAR10':
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/',
+                'batch_size': batch_size,
+            },
+            'loss_query': 'CrossEntropyLoss',
+            'evaluator_query': 'MNISTEvaluator',
+            'evaluator_kwargs': {},
+            'scheduler_mode': 'max',
+        }
+    elif dataset == 'Peptides-func':
+        # `root: 'data/'` bare: LRGBDataset lowercases `name` and creates its own subdirectory under
+        # the root, so naming one here would nest a second copy instead of finding the existing one.
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/',
+                'batch_size': batch_size,
+            },
+            'loss_query': 'BCEWithLogitsLoss',
+            'evaluator_query': 'APEvaluator',
+            'evaluator_kwargs': {},
+            'scheduler_mode': 'max',
+        }
+    elif dataset == 'Peptides-struct':
+        # Same graphs as -func, so the same loader and root; only the targets and therefore the
+        # loss, the metric and its direction differ.
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/',
+                'batch_size': batch_size,
+            },
+            'loss_query': 'L1Loss',
+            'evaluator_query': 'MultiTargetMAEEvaluator',
+            'evaluator_kwargs': {},
+            'scheduler_mode': 'min',
+        }
+    elif dataset == 'ogbg-ppa':
+        # `root: 'data/'` bare: PygGraphPropPredDataset creates its own `ogbg_ppa` subdirectory
+        # under the root, so naming one here would nest a second copy instead of finding the
+        # existing one — and re-downloading 31.5 GB.
+        #
+        # `rank_mode` is set rather than left to the caller because the resolver REJECTS anything
+        # but 'position' on this dataset (a feature-mode rank over a constant node feature ties
+        # every node, so the gate would silently be a no-op), and without it every trial would raise
+        # a ValueError that `catch=(RuntimeError,)` does not catch, aborting the whole study.
+        #
+        # `AccuracyEvaluator`, not `OGBGraphPropPredEvaluator`: OGB's ppa evaluator wants [N, 1]
+        # class INDICES on both sides, while this loop hands the evaluator the raw [N, 37] logits,
+        # and its shape check raises RuntimeError — which the study's `catch` swallows as a failed
+        # trial, so the search would quietly fail everything. AccuracyEvaluator already takes the
+        # argmax and flattens y, computing exactly what OGB's `_eval_acc` does at num_tasks=1 with
+        # no missing labels.
+        model_args['rank_mode'] = 'position'
+        return {
+            'model_args': model_args,
+            'data_args': {
+                'root': 'data/',
+                'batch_size': batch_size,
+            },
+            'loss_query': 'CrossEntropyLoss',
+            'evaluator_query': 'AccuracyEvaluator',
             'evaluator_kwargs': {},
             'scheduler_mode': 'max',
         }
@@ -553,20 +700,17 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # keeps the wide/deep corner of the arxiv box feasible at all. 256 is the widest that fits arxiv
     # full-graph. Depth is per dataset, the measured k-hop covering depth + 2: Questions [2, 6],
     # ogbn-arxiv [2, 7] (§ Datasets → node-level).
+    # At graph level the width choices are the standard four unless GRAPH_WIDTHS overrides them,
+    # which only `ogbg-ppa` does (see there).
     node_level = dataset in NODE_DATASETS
     hidden_channels = fix_hidden_channels if fix_hidden_channels is not None \
         else trial.suggest_categorical('hidden_channels',
                                        list(NODE_WIDTHS[dataset]) if node_level
-                                       else [128, 256, 512, 1024])
+                                       else list(GRAPH_WIDTHS.get(dataset, GRAPH_DEFAULT_WIDTHS)))
     num_layers = fix_num_layers if fix_num_layers is not None \
         else trial.suggest_int('num_layers', 2, NODE_MAX_LAYERS.get(dataset, 8))
     dropout = trial.suggest_float('dropout', 0.1, 0.7)
-    # Per-dataset batch size (power of 2), sized to keep steps/epoch reasonable; not searched.
-    # ZINC search uses the subset (~10k graphs), so a smaller batch than the full-data configs.
-    # The node-level datasets train full-graph — one graph is one batch — so they have none, and
-    # `_get_training_config` leaves `batch_size` out of their `data_args`.
-    batch_size = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuperpixels': 256,
-                  'ogbg-code2': 128, 'Questions': None, 'ogbn-arxiv': None}[dataset]
+    batch_size = BATCH_SIZES[dataset]
     # Node level widens the lr range in both directions. The published full-graph arxiv configs sit
     # at 1e-2 (OGB's own node example, tunedGNN), which is the graph-level range's exact ENDPOINT,
     # and a log-uniform prior over [1e-5, 1e-2] puts only ~14% of its mass above 3e-3 — TPE would
@@ -590,10 +734,19 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     # Gated on the REQUESTED device being a GPU, not on one merely being present: `torch.device('cpu')`
     # has index None, which `get_device_properties` resolves to GPU 0, so a CPU run would otherwise be
     # pruned against a card it is not using.
-    if node_level and torch.device(device).type == 'cuda':
+    #
+    # `ogbg-ppa` joins this at GRAPH level, for the same reason in a different unit: its graphs are
+    # two orders of magnitude denser than the molecular ones, so the wide/deep corner of a
+    # 128-graph batch exceeds the card just as a full-graph node config does.
+    if node_level:
+        peak = _node_peak_gib(dataset, hidden_channels, num_layers)
+    elif dataset in GRAPH_EDGE_ENTRIES:
+        peak = _graph_peak_gib(dataset, hidden_channels, num_layers, batch_size)
+    else:
+        peak = None
+    if peak is not None and torch.device(device).type == 'cuda':
         budget = mem_fraction * torch.cuda.get_device_properties(
             torch.device(device).index).total_memory / 1024 ** 3
-        peak = _node_peak_gib(dataset, hidden_channels, num_layers)
         if peak > budget:
             print(f"Trial {trial.number}: pruned as infeasible — predicted peak {peak:.2f} GiB "
                   f"exceeds the {budget:.2f} GiB budget (hidden_channels={hidden_channels}, "
@@ -676,13 +829,20 @@ def main(args):
         # budget to enumerate against, and `torch.device('cpu').index` is None, which
         # `get_device_properties` would resolve to GPU 0 — reporting a constraint that is not
         # applied, or raising on a machine with no GPU at all.
-        if node_level and torch.device(args.device).type == 'cuda':
-            depths = range(2, NODE_MAX_LAYERS[args.dataset] + 1)
+        # At graph level the same report covers whichever datasets `objective` prunes, i.e. those
+        # with a GRAPH_EDGE_ENTRIES entry; there the box also depends on the dataset's fixed batch
+        # size, which is why BATCH_SIZES sits at module scope beside the width and depth bounds.
+        if (node_level or args.dataset in GRAPH_EDGE_ENTRIES) and \
+                torch.device(args.device).type == 'cuda':
+            depths = range(2, NODE_MAX_LAYERS.get(args.dataset, 8) + 1)
             budget = mem_fraction * torch.cuda.get_device_properties(
                 torch.device(args.device).index).total_memory / 1024 ** 3
-            widths = NODE_WIDTHS[args.dataset]
+            widths = NODE_WIDTHS[args.dataset] if node_level \
+                else GRAPH_WIDTHS.get(args.dataset, GRAPH_DEFAULT_WIDTHS)
             box = [(h, l) for h in widths for l in depths
-                   if _node_peak_gib(args.dataset, h, l) <= budget]
+                   if (_node_peak_gib(args.dataset, h, l) if node_level
+                       else _graph_peak_gib(args.dataset, h, l,
+                                            BATCH_SIZES[args.dataset])) <= budget]
             print(f"Memory-admissible (hidden_channels, num_layers) within {budget:.2f} GiB "
                   f"(mem_fraction {mem_fraction}): {len(box)} of "
                   f"{len(widths) * len(depths)} — {box}")
@@ -735,7 +895,8 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset',
-                        choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels', 'ogbg-code2',
+                        choices=['ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'MNISTSuperpixels', 'CIFAR10',
+                                 'Peptides-func', 'Peptides-struct', 'ogbg-ppa', 'ogbg-code2',
                                  'Questions', 'ogbn-arxiv'],
                         required=True)
     parser.add_argument('--device', default='cuda:0')

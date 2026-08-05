@@ -20,15 +20,30 @@ import os
 import re
 
 SUFFIX = {'ogbg-molhiv': 'hiv', 'ogbg-molpcba': 'molpcba', 'ZINC': 'zinc',
-          'MNISTSuperpixels': 'mnist', 'ogbg-code2': 'code2', 'Questions': 'questions'}
+          'MNISTSuperpixels': 'mnist', 'CIFAR10': 'cifar10', 'Peptides-func': 'pepfunc',
+          'Peptides-struct': 'pepstruct', 'ogbg-ppa': 'ppa', 'ogbg-code2': 'code2',
+          'Questions': 'questions'}
 HAS_EDGE = {'ogbg-molhiv': True, 'ogbg-molpcba': True, 'ZINC': True,
-            'MNISTSuperpixels': False, 'ogbg-code2': False, 'Questions': False}
+            'MNISTSuperpixels': False, 'CIFAR10': False, 'Peptides-func': True,
+            'Peptides-struct': True, 'ogbg-ppa': True, 'ogbg-code2': False, 'Questions': False}
 
 
 def _fmt(v):
-    # compact, YAML-friendly formatting (e.g. 6.5e-05, 0.05, 256)
+    # compact, YAML-friendly formatting (e.g. 6.5e-05, 0.05, 256).
+    #
+    # A float in exponent form must keep a dot in its mantissa, and the requirement is stricter than
+    # it looks: `train.py` reads `train_args` as one mapping, so configargparse re-serializes what
+    # the file parsed and `type=yaml.safe_load` parses it again. That second pass sees `repr(v)`, and
+    # YAML 1.1 rejects a dotless mantissa — `1e-06` comes back as the STRING '1e-06', which reaches
+    # Adam as a weight decay and raises a TypeError only once training starts. `%.6g` writes exactly
+    # that form for any round value, so the dot is restored here rather than left to the caller: a
+    # searched log-uniform draw is never round, but a hand-passed 1e-6 is.
     if isinstance(v, float):
-        return f'{v:.6g}'
+        s = f'{v:.6g}'
+        if 'e' in s and '.' not in s:
+            mantissa, exponent = s.split('e')
+            s = f'{mantissa}.0e{exponent}'
+        return s
     return str(v)
 
 

@@ -8,16 +8,19 @@ from ogb.graphproppred import PygGraphPropPredDataset
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 from ogb.nodeproppred import PygNodePropPredDataset
 from torch import nn
-from torch_geometric.datasets import HeterophilousGraphDataset, MNISTSuperpixels, Planetoid, ZINC
+from torch_geometric.datasets import (GNNBenchmarkDataset, HeterophilousGraphDataset, LRGBDataset,
+                                      MNISTSuperpixels, Planetoid, ZINC)
 from torch_geometric.loader import DataLoader
 
 import models
 from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, node_rank, sort_graphs
 from data_utils.code2 import encode_y_to_arr, get_vocab_mapping
 from data_utils.exp import PlanarSATPairsDataset
-from data_utils.transforms import AddDepthField, AddDepthToX, RemoveEdgeAttr, ToUndirectedNoAttr, UnsqueezeTargetDim
-from utils.evaluator import (AccuracyEvaluator, Code2Evaluator, MicroF1Evaluator, MNISTEvaluator,
-                             OGBNodeEvaluator, ROCAUCEvaluator, ZINCEvaluator)
+from data_utils.transforms import (AddDepthField, AddDepthToX, AddPosField, RemoveEdgeAttr,
+                                   ToUndirectedNoAttr, UnsqueezeTargetDim)
+from utils.evaluator import (AccuracyEvaluator, APEvaluator, Code2Evaluator, MicroF1Evaluator,
+                             MNISTEvaluator, MultiTargetMAEEvaluator, OGBNodeEvaluator,
+                             ROCAUCEvaluator, ZINCEvaluator)
 
 # Datasets predicted per node rather than per graph. They take a different route through the
 # resolver — no canonical sort, no graph readout, one graph per "batch" — and the readout guard
@@ -108,8 +111,9 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     batch_size = dataset_kwargs.pop('batch_size', 1)
 
     model_choices = ['LDNA', 'DeeperGCN', 'DGN', 'EGC', 'GraphSAGE', 'GAT', 'GATv2', 'GCN', 'GIN', 'GINE', 'PNA', 'GNN-VPA']
-    dataset_choices = ['MNISTSuperpixels', 'ZINC', 'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-code2',
-                       'EXP', 'CEXP'] + list(NODE_DATASETS)
+    dataset_choices = ['MNISTSuperpixels', 'CIFAR10', 'ZINC', 'Peptides-func', 'Peptides-struct',
+                       'ogbg-molhiv', 'ogbg-molpcba', 'ogbg-ppa', 'ogbg-code2', 'EXP',
+                       'CEXP'] + list(NODE_DATASETS)
 
     # Load the dataset
     if dataset_query == 'MNISTSuperpixels':
@@ -131,6 +135,41 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             num_eig_vec = model_kwargs.get('num_eig_vec', 1)
             train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
             val_dataset = test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
+    elif dataset_query == 'CIFAR10':
+        # The superpixel sibling of MNISTSuperpixels: the same pre_transform (the Cartesian
+        # relative-position edge attribute is built and then dropped, leaving an edge-less graph
+        # whose geometry survives only through the connectivity) over a different upstream build.
+        # Two differences matter. It ships a REAL validation set, so it takes ZINC's shape of three
+        # separate datasets rather than MNIST's `val_dataset = test_dataset` aliasing; the reported
+        # figure is `best_test` either way, but here the LR schedule and the search's trial score
+        # read a split that is genuinely held out, where on MNIST they read the test split. And its
+        # edge_index is a DIRECTED 8-NN graph (out-degree exactly 8; 20.05% of edges have no reverse,
+        # measured over the whole 45,000-graph train split) where MNIST's is symmetric, which is what
+        # rules out the eigenvector field below.
+        transform = T.Compose([
+            T.Cartesian(cat=False),
+            RemoveEdgeAttr()
+        ])
+        train_dataset = GNNBenchmarkDataset(name='CIFAR10', split='train', pre_transform=transform, **dataset_kwargs)
+        val_dataset = GNNBenchmarkDataset(name='CIFAR10', split='val', pre_transform=transform, **dataset_kwargs)
+        test_dataset = GNNBenchmarkDataset(name='CIFAR10', split='test', pre_transform=transform, **dataset_kwargs)
+
+        train_dataset = sort_graphs(train_dataset, sort_y=False)
+        val_dataset = sort_graphs(val_dataset, sort_y=False)
+        test_dataset = sort_graphs(test_dataset, sort_y=False)
+
+        # DGN's directional field here is the superpixel image coordinates, not the Laplacian
+        # eigenvectors the other image/molecular datasets use — the substitution the DGN paper makes
+        # on this dataset, and the same one `ogbg-code2` makes with AST depth. `add_eig_vec` would
+        # not merely be degenerate on the directed connectivity above, it would be silently wrong:
+        # `torch.linalg.eigh` reads one triangle and so decomposes a matrix that is not the
+        # Laplacian it was given (see AddPosField). Attached lazily, gated on DGN exactly as the
+        # eigenvector path is, so its presence on the batch stays the routing switch; `pos` already
+        # rides on the data, so there is nothing to precompute or cache.
+        if model_query == 'DGN':
+            train_dataset.transform = AddPosField()
+            val_dataset.transform = AddPosField()
+            test_dataset.transform = AddPosField()
     elif dataset_query == 'ZINC':
         transform = UnsqueezeTargetDim()
         subset = dataset_kwargs.pop('subset', False)
@@ -147,11 +186,84 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
             val_dataset = add_eig_vecs(val_dataset, k=num_eig_vec, cache_name='val')
             test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
+    elif dataset_query in ['Peptides-func', 'Peptides-struct']:
+        # The two LRGB peptide tasks are the SAME graphs with different targets — 10 binary labels
+        # for -func, 11 regression targets for -struct — so one branch covers both and `name`
+        # selects the task. Molecular graphs with atom features and bond edge_attr, so this is the
+        # ZINC branch's shape (three real splits, feature lexsort, per-split eigenvector cache) with
+        # two differences. There is no `UnsqueezeTargetDim`: `y` already carries a task dimension and
+        # collates to [num_graphs, num_tasks]. And there is no normalizing pre_transform:
+        # -struct's targets are standardized to zero mean and unit variance by LRGB's own
+        # `process()` before the table these caches are built from — which is the scale the
+        # benchmark's published MAE is on — so normalizing here would apply it twice.
+        train_dataset = LRGBDataset(name=dataset_query, split='train', **dataset_kwargs)
+        val_dataset = LRGBDataset(name=dataset_query, split='val', **dataset_kwargs)
+        test_dataset = LRGBDataset(name=dataset_query, split='test', **dataset_kwargs)
+
+        train_dataset = sort_graphs(train_dataset, sort_y=False)
+        val_dataset = sort_graphs(val_dataset, sort_y=False)
+        test_dataset = sort_graphs(test_dataset, sort_y=False)
+
+        if model_query == 'DGN':
+            num_eig_vec = model_kwargs.get('num_eig_vec', 1)
+            train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
+            val_dataset = add_eig_vecs(val_dataset, k=num_eig_vec, cache_name='val')
+            test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
     elif dataset_query in ['ogbg-molhiv', 'ogbg-molpcba']:
         dataset = PygGraphPropPredDataset(name=dataset_query, **dataset_kwargs)
         split_idx = dataset.get_idx_split()
 
         dataset = sort_graphs(dataset, sort_y=False)
+        if model_query == 'DGN':
+            dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all')
+
+        train_dataset = dataset[split_idx['train']]
+        val_dataset = dataset[split_idx['valid']]
+        test_dataset = dataset[split_idx['test']]
+    elif dataset_query == 'ogbg-ppa':
+        # 37-way species classification over protein-association graphs. The molecular OGB branch
+        # above is the shape, with one substitution: the nodes carry NO features, so the feature
+        # lexsort cannot impose a permutation-invariant order and the device is the nauty canonical
+        # labelling instead (canonicalize_graphs, as on EXP/CEXP), which LDNA reads via
+        # rank_mode='position'. That labelling costs 2.87 ms/graph — 7.6 minutes over these 158,100
+        # — so it is cached in processed_dir and only the first of a ranking's twelve processes pays
+        # it, saving ~90 minutes across the set. The cache is a convenience, not what makes ppa
+        # feasible; host RAM is the binding constraint here (see canonicalize_graphs).
+        #
+        # The rank-mode guard runs BEFORE the dataset is constructed, because constructing it is a
+        # ~65 s, ~29 GiB load that a config which cannot run should not pay for.
+        if model_query == 'LDNA' and model_kwargs.get('rank_mode') != 'position':
+            raise ValueError(f"Argument `rank_mode` must be 'position' for LDNA on ogbg-ppa, whose "
+                             f"canonical node order is the nauty labelling, not a feature sort; got "
+                             f"'{model_kwargs.get('rank_mode')}'. Every node here carries the same "
+                             f"constant feature row, so a feature-mode rank ties them all, every "
+                             f"gate input delta is exactly 0, and the rank gate silently never "
+                             f"engages — a no-op rather than an error")
+        dataset = PygGraphPropPredDataset(name=dataset_query, **dataset_kwargs)
+        split_idx = dataset.get_idx_split()
+
+        # `y` collates to [num_graphs, 1] here. The CrossEntropyLoss path in train.py flattens its
+        # labelled-row filter to `(y == y).view(-1)` and passes `y[is_labelled].long()` as class
+        # indices, so the target would reach the loss with a trailing dimension it does not accept.
+        # Flattened on the store rather than through a transform because `slices['y']` is
+        # `arange(num_graphs + 1)` either way, so a flat `y` still separates to one label per graph;
+        # done before anything calls `get`, whose per-graph cache would keep serving the old view.
+        dataset._data.y = dataset._data.y.view(-1)
+
+        dataset = canonicalize_graphs(dataset, cache_name='all')
+
+        # A constant node feature, since every model here starts from a node encoder and there is
+        # nothing to encode — the convention data_utils/brec.py already uses on featureless graphs.
+        # Applied lazily per access (a `transform`, not a `pre_transform`) for the reason the
+        # ogbg-code2 branch below gives: a pre_transform would make OGB rewrite a 31.5 GB processed
+        # store, and `dataset.get(i)` — which the canonicalization above reads — must keep seeing the
+        # raw graph, whose `x is None` is what leaves nauty's colour partition empty.
+        dataset.transform = T.Constant()
+
+        # As on the molecular branches, the directional field is attached AFTER the canonical order
+        # (which permutes the nodes) and BEFORE the split slicing (an index view cannot be
+        # re-collated). It reads edge_index only, so the lazy constant feature above is invisible to
+        # it — `add_eig_vecs` goes through `get`, which does not apply a transform.
         if model_query == 'DGN':
             dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all')
 
@@ -314,6 +426,15 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'node_encoder': nn.Linear(1, embedding_dim),
             'num_pred_heads': train_dataset.num_classes
         })
+    elif dataset_query == 'CIFAR10':
+        # Edge-less after `RemoveEdgeAttr`, as MNIST is. The node features are the three RGB
+        # channels against MNIST's single intensity one, read off the dataset rather than hardcoded
+        # so the encoder tracks the data rather than a transcribed constant.
+        model_kwargs.update({
+            'in_channels': embedding_dim,
+            'node_encoder': nn.Linear(train_dataset.num_features, embedding_dim),
+            'num_pred_heads': train_dataset.num_classes
+        })
     elif dataset_query == 'ZINC':
         model_kwargs.update({
             'in_channels': embedding_dim,
@@ -322,6 +443,19 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'edge_encoder': nn.Embedding(4, embedding_dim=embedding_dim),
             'num_pred_heads': 1
         })
+    elif dataset_query in ['Peptides-func', 'Peptides-struct']:
+        # The node/edge features are OGB's molecular feature vocabulary (every column stays inside
+        # `get_atom_feature_dims()` / `get_bond_feature_dims()`), so the OGB encoders apply verbatim
+        # as on molhiv/molpcba. The head width is read from `num_classes` rather than molhiv's
+        # `num_tasks`, which `LRGBDataset` does not define: it is the target dimension either way —
+        # 10 labels for -func, 11 regression targets for -struct.
+        model_kwargs.update({
+            'in_channels': embedding_dim,
+            'edge_dim': embedding_dim,
+            'node_encoder': AtomEncoder(emb_dim=embedding_dim),
+            'edge_encoder': BondEncoder(emb_dim=embedding_dim),
+            'num_pred_heads': train_dataset.num_classes
+        })
     elif dataset_query in ['ogbg-molhiv', 'ogbg-molpcba']:
         model_kwargs.update({
             'in_channels': embedding_dim,
@@ -329,6 +463,20 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
             'node_encoder': AtomEncoder(emb_dim=embedding_dim),
             'edge_encoder': BondEncoder(emb_dim=embedding_dim),
             'num_pred_heads': dataset.num_tasks
+        })
+    elif dataset_query == 'ogbg-ppa':
+        # Neither encoder is an OGB molecular one. The node feature is the single constant column
+        # the transform attaches, and `edge_attr` is a 7-dim CONTINUOUS vector, not OGB's 3-field
+        # categorical bond vocabulary — `BondEncoder` would index an embedding table with float
+        # co-occurrence scores. Two plain linear maps, which is what OGB's own ppa reference uses.
+        # The head is `num_classes` (37 species): `num_tasks` is 1 here and would build a
+        # single-logit head under a 37-class CrossEntropy loss.
+        model_kwargs.update({
+            'in_channels': embedding_dim,
+            'edge_dim': embedding_dim,
+            'node_encoder': nn.Linear(1, embedding_dim),
+            'edge_encoder': nn.Linear(7, embedding_dim),
+            'num_pred_heads': dataset.num_classes
         })
     elif dataset_query == 'ogbg-code2':
         # Edge-less: no edge_dim / edge_encoder. `num_pred_heads=None` makes the backbone return
@@ -432,7 +580,9 @@ def evaluator_resolver(query, **kwargs):
         'OGBNodeEvaluator': OGBNodeEvaluator,
         'OGBGraphPropPredEvaluator': ogb.graphproppred.Evaluator,
         'ZINCEvaluator': ZINCEvaluator,
+        'MultiTargetMAEEvaluator': MultiTargetMAEEvaluator,
         'MNISTEvaluator': MNISTEvaluator,
+        'APEvaluator': APEvaluator,
         'AccuracyEvaluator': AccuracyEvaluator,
         'ROCAUCEvaluator': ROCAUCEvaluator,
         'MicroF1Evaluator': MicroF1Evaluator,
