@@ -7,6 +7,11 @@ from scipy.sparse.csgraph import connected_components
 from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.utils import degree, sort_edge_index, to_dense_adj
 
+# Version of the canonical-labelling RULE, carried in the permutation cache's name and digest (see
+# canonicalize_graphs). Bump it whenever canonicalize_graph's colouring construction changes or the
+# pynauty version underneath it does.
+CANON_RULE_VERSION = 'v1'
+
 
 def sort_graph(graph: Data, sort_y=False):
     x_arr = graph.x.numpy()
@@ -22,6 +27,13 @@ def sort_graph(graph: Data, sort_y=False):
     graph.x = graph.x[graph.new2old]
     if sort_y:
         graph.y = graph.y[graph.new2old]
+    # `pos` is a per-node attribute like `x`, so leaving it behind desynchronises it from the nodes
+    # silently: it keeps its shape and every downstream check still passes while `pos[i]` describes
+    # some other node. Nothing read `pos` until DGN's CIFAR10 directional field did, so this
+    # permute is what makes that field legitimate; it also closes the same latent desync on
+    # MNISTSuperpixels, which carries `pos` and never reads it.
+    if graph.pos is not None:
+        graph.pos = graph.pos[graph.new2old]
     graph.edge_index = graph.old2new[graph.edge_index]
 
     # Sort the edge indices and attributes
@@ -41,43 +53,50 @@ def sort_graphs(dataset: InMemoryDataset, sort_y=False):
     return dataset
 
 
-def canonicalize_graph(graph: Data, sort_y=False):
+def canonicalize_graph(graph: Data, sort_y=False, new2old=None):
     # Individualizing canonical node order for datasets whose features cannot impose one (EXP/CEXP,
     # BREC: 1-WL-hard, essentially featureless — sort_graph's lexicographic sort ties every node).
     # A nauty canonical labelling relabels the graph into a fixed, reproducible order that is
     # identical for isomorphic graphs (exact permutation invariance) and, unlike the feature
     # lexsort, individualizes ties so every node receives a distinct position. LDNA reads the order
     # via rank_mode='position'. Bookkeeping mirrors sort_graph, so the two are interchangeable.
-    import pynauty  # optional heavy dependency; only imported where a canonical labelling is needed
+    #
+    # A precomputed `new2old` skips the labelling itself, which is the expensive part (measured
+    # 2.87 ms/graph on ogbg-ppa, against ~0.4 ms for the permute and re-sort below it); that is what
+    # canonicalize_graphs' on-disk cache stores, and with one supplied pynauty is never imported.
+    if new2old is None:
+        import pynauty  # optional heavy dependency; only imported where a labelling is computed
 
-    n = graph.num_nodes
+        n = graph.num_nodes
 
-    # nauty wants an undirected simple adjacency; PyG stores both directions, so symmetrize, drop
-    # any self-loops, and dedupe into per-vertex neighbor lists.
-    adjacency = {i: set() for i in range(n)}
-    src, dst = graph.edge_index.tolist()
-    for a, b in zip(src, dst):
-        if a != b:
-            adjacency[a].add(b)
-            adjacency[b].add(a)
-    adjacency = {i: sorted(neighbors) for i, neighbors in adjacency.items()}
+        # nauty wants an undirected simple adjacency; PyG stores both directions, so symmetrize, drop
+        # any self-loops, and dedupe into per-vertex neighbor lists.
+        adjacency = {i: set() for i in range(n)}
+        src, dst = graph.edge_index.tolist()
+        for a, b in zip(src, dst):
+            if a != b:
+                adjacency[a].add(b)
+                adjacency[b].add(a)
+        adjacency = {i: sorted(neighbors) for i, neighbors in adjacency.items()}
 
-    # Ordered color partition from the feature rows, so the labelling refines the features instead
-    # of ignoring them. The partition order is significant to nauty, so the color classes are taken
-    # in lexicographic feature-row order — itself permutation-invariant — which keeps the resulting
-    # labelling isomorphism-invariant. No features (x is None) leaves the graph uncolored.
-    vertex_coloring = []
-    if graph.x is not None:
-        rows = [tuple(row) for row in graph.x.tolist()]
-        cells = {row: set() for row in rows}
-        for node, row in enumerate(rows):
-            cells[row].add(node)
-        vertex_coloring = [cells[row] for row in sorted(cells)]
+        # Ordered color partition from the feature rows, so the labelling refines the features instead
+        # of ignoring them. The partition order is significant to nauty, so the color classes are taken
+        # in lexicographic feature-row order — itself permutation-invariant — which keeps the resulting
+        # labelling isomorphism-invariant. No features (x is None) leaves the graph uncolored.
+        vertex_coloring = []
+        if graph.x is not None:
+            rows = [tuple(row) for row in graph.x.tolist()]
+            cells = {row: set() for row in rows}
+            for node, row in enumerate(rows):
+                cells[row].add(node)
+            vertex_coloring = [cells[row] for row in sorted(cells)]
 
-    # canon_label returns new2old (the old vertex placed at each canonical position; empirically
-    # verified to be this direction, not its inverse), matching sort_graph's new2old.
-    canon = pynauty.canon_label(pynauty.Graph(n, False, adjacency, vertex_coloring))
-    sorted_idx = torch.as_tensor(canon).long()
+        # canon_label returns new2old (the old vertex placed at each canonical position; empirically
+        # verified to be this direction, not its inverse), matching sort_graph's new2old.
+        canon = pynauty.canon_label(pynauty.Graph(n, False, adjacency, vertex_coloring))
+        new2old = torch.as_tensor(canon).long()
+
+    sorted_idx = new2old
     inv_sorted_idx = torch.empty_like(sorted_idx)
     inv_sorted_idx[sorted_idx] = torch.arange(sorted_idx.shape[0])
 
@@ -89,6 +108,13 @@ def canonicalize_graph(graph: Data, sort_y=False):
         graph.x = graph.x[graph.new2old]
     if sort_y:
         graph.y = graph.y[graph.new2old]
+    # Same guarded permute sort_graph does, and for the same reason: `pos` is a per-node attribute,
+    # so leaving it behind desynchronises it silently — the shape survives and every downstream
+    # check passes while `pos[i]` describes some other node. Inert today, since no dataset that
+    # takes this path carries `pos` (EXP/CEXP/BREC/ogbg-ppa), but the two orderings must not
+    # disagree about what they realign.
+    if graph.pos is not None:
+        graph.pos = graph.pos[graph.new2old]
     graph.edge_index = graph.old2new[graph.edge_index]
 
     # Sort the edge indices and attributes
@@ -100,9 +126,78 @@ def canonicalize_graph(graph: Data, sort_y=False):
     return graph
 
 
-def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False):
+def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None):
     all_graphs = [dataset.get(i) for i in range(len(dataset))]
-    canon_graphs = [canonicalize_graph(g, sort_y) for g in all_graphs]
+    num_nodes = [graph.num_nodes for graph in all_graphs]
+
+    # The labelling is a deterministic function of the graph, so it is computed once and cached in
+    # the dataset's processed directory, following add_eig_vecs' sidecar contract below: a ranking
+    # run starts one process per config and would otherwise repeat it on every start. Measured on
+    # ogbg-ppa's 158,100 graphs: 2.87 ms/graph, so 7.6 minutes labelled against 2.6 minutes for the
+    # digest, permute and re-collate a cache hit still pays — ~90 minutes saved over a twelve-config
+    # ranking. What is cached is the PERMUTATION rather than the permuted graphs — 38.5M int64 is
+    # 308 MB against the ~29 GiB the canonicalized store itself occupies, and old2new, edge_index
+    # and edge_attr are all cheap functions of it.
+    #
+    # The digest is taken over the PRE-canonicalization graph, for two reasons. On a cache hit the
+    # canonical order does not exist yet, so keying on it would mean doing the work the key exists
+    # to avoid. And a canonical labelling is a function of the isomorphism class alone: two builds
+    # of one dataset with different raw node orderings yield the IDENTICAL canonicalized edge_index
+    # but need DIFFERENT permutations, so a post-canonical digest would validate a cache that no
+    # longer matches the data on disk.
+    #
+    # Node count, connectivity AND features are hashed, because the labelling reads all three (x
+    # becomes nauty's colour partition above). add_eig_vecs hashes connectivity alone, which is
+    # correct there — its field ignores features — and would be a silent misalignment here.
+    #
+    # The rule version is hashed too, and named in the file. A pre-canonical digest is by
+    # construction blind to a change in the labelling RULE (the colouring built above, or the
+    # pynauty version underneath), so without it a stale cache would still validate. add_eig_vecs
+    # needs no such tag because a revised sort changes the bytes it already hashes.
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(CANON_RULE_VERSION.encode())
+    for graph in all_graphs:
+        digest.update(str(graph.num_nodes).encode())
+        digest.update(graph.edge_index.numpy().tobytes())
+        if graph.x is not None:
+            digest.update(graph.x.numpy().tobytes())
+
+    cache_path = None if cache_name is None else \
+        os.path.join(dataset.processed_dir, f'{cache_name}_canon_{CANON_RULE_VERSION}.pt')
+    cache = torch.load(cache_path) if cache_path is not None and os.path.exists(cache_path) else None
+    # As in add_eig_vecs: anything that is not the current dict format with a matching digest and
+    # the right length falls through to recompute rather than raising, since the cache is a
+    # discardable accelerator and not a source of truth.
+    valid_cache = isinstance(cache, dict) and cache.get('digest') == digest.hexdigest() \
+        and isinstance(cache.get('new2old'), torch.Tensor) \
+        and cache['new2old'].shape == (sum(num_nodes),)
+    perms = list(cache['new2old'].split(num_nodes)) if valid_cache else [None] * len(all_graphs)
+
+    # Pinned to one thread for the same reason add_eig_vecs is, and the effect here is larger. Every
+    # tensor operation in the loop is graph-sized — a gather over one edge_index, an argsort of a few
+    # thousand entries — so letting torch fan out costs far more in thread-launch overhead than it
+    # saves: measured on ogbg-ppa, unpinned the loop took 45 cores (4497% CPU over 191 threads) and
+    # had not finished 158,100 graphs in 21 minutes, against 2 threads doing ~2.3 ms/graph. It also
+    # keeps the loop from monopolizing a machine this project shares. A process pool is the
+    # alternative and is deliberately not taken: it would need module-level globals and a
+    # fork-safety guarantee this project has not established for pynauty.
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    canon_graphs = [canonicalize_graph(graph, sort_y, perm)
+                    for graph, perm in zip(all_graphs, perms)]
+    torch.set_num_threads(num_threads)
+
+    if not valid_cache and cache_path is not None:
+        torch.save({'digest': digest.hexdigest(),
+                    'new2old': torch.cat([graph.new2old for graph in canon_graphs])}, cache_path)
+
+    # Release the source store BEFORE collating. Every per-node and per-edge tensor the loop above
+    # produced is a fresh one, so the dataset itself is all that still references the old store —
+    # including `_data_list`, whose cached per-graph views would otherwise pin it past the setter
+    # that clears them. On EXP/CEXP that is bookkeeping; on ogbg-ppa the store is ~29 GiB and
+    # holding it across the collate is the difference between a ~59 GiB and an ~88 GiB peak.
+    dataset._data_list = None
+    dataset._data = None
 
     dataset.data, dataset.slices = dataset.collate(canon_graphs)
     return dataset
@@ -172,6 +267,21 @@ def add_eig_vec(graph: Data, k=1):
     # `torch_geometric.seed_everything` seeds, which would change the model init of this baseline
     # relative to every other one.
     adj = to_dense_adj(graph.edge_index, max_num_nodes=graph.num_nodes)[0]
+
+    # A directed edge_index makes `adj` asymmetric, and `eigh` assumes a Hermitian input and reads
+    # only one triangle — so it returns the spectrum of a matrix it was never given, with no error
+    # and no failed shape check. That cost this project a silently wrong DGN field on CIFAR10, whose
+    # 8-NN graph leaves 20.05% of edges without a reverse; the fix there was to substitute the image
+    # coordinates, the field the DGN paper itself uses on that dataset. Every remaining caller is
+    # symmetric, so this check never fires today — which is exactly why it is worth having before
+    # the next dataset arrives.
+    if not bool((adj == adj.t()).all()):
+        raise ValueError(f"The Laplacian eigenvector field needs an undirected graph: this one has "
+                         f"{int((adj != adj.t()).sum()) // 2} edge(s) with no reverse. `eigh` would "
+                         f"silently decompose the lower triangle mirrored onto itself, which is not "
+                         f"this graph's Laplacian — supply a domain field instead, as CIFAR10 and "
+                         f"ogbg-code2 do")
+
     eig_vec = torch.zeros(graph.num_nodes, k)
 
     # The Laplacian has one zero eigenvalue per connected component, so on a disconnected graph
