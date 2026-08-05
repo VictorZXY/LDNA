@@ -1,0 +1,40 @@
+experiment_name: gine_pepfunc
+
+# Model specific arguments/hyperparameters
+model: GINE
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 7
+  num_trans_layers: 1
+  num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
+  dropout: 0.144427
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: Peptides-func
+data_args:
+  root: data/
+  batch_size: 64
+
+# Training specific arguments/hyperparameters
+cuda: 1
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000118959
+    weight_decay: 2.22642e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: APEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
