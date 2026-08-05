@@ -1,6 +1,6 @@
 from ogb.graphproppred import Evaluator as _OGBEvaluator
 from ogb.nodeproppred import Evaluator as _OGBNodeEvaluator
-from sklearn.metrics import f1_score, roc_auc_score
+from sklearn.metrics import average_precision_score, f1_score, roc_auc_score
 
 from data_utils.code2 import decode_arr_to_seq
 
@@ -182,4 +182,80 @@ class ZINCEvaluator:
             total_error = (y_pred - y_true).abs().sum().item()
 
         return {self.eval_metric: total_error / len(y_true)}
-        
+
+
+class APEvaluator:
+    # Multi-label graph classification scored by average precision (Peptides-func's 10 tasks).
+    # Replicates OGB's `eval_ap` — which the OGB evaluator itself will only run for a dataset in its
+    # own registry — rather than reimplementing a metric: AP is computed per task and averaged
+    # unweighted over the tasks, and a task is scored only where the split carries both a positive
+    # and a negative, average precision being undefined otherwise, with missing labels dropped from
+    # the task they belong to rather than from the whole row. Neither guard fires on this dataset
+    # (every task always carries both classes; there are no missing labels), but both are kept: this
+    # is the general multi-label AP evaluator now, and a molpcba-shaped target would hand NaNs
+    # straight to `average_precision_score` without the mask.
+    def __init__(self, **kwargs):
+        self.eval_metric = 'ap'
+
+    def eval(self, input_dict):
+        if not 'y_true' in input_dict:
+            raise RuntimeError("Missing key of y_true")
+        if not 'y_pred' in input_dict:
+            raise RuntimeError("Missing key of y_pred")
+
+        y_true, y_pred = input_dict['y_true'], input_dict['y_pred']
+
+        """
+            y_true: numpy ndarray or torch tensor of shape (num_graphs, num_tasks)
+            y_pred: numpy ndarray or torch tensor of shape (num_graphs, num_tasks)
+        """
+
+        y_true = y_true.detach().cpu()
+        y_pred = y_pred.detach().cpu()
+
+        ap_list = []
+        for i in range(y_true.size(1)):
+            if bool((y_true[:, i] == 1).any()) and bool((y_true[:, i] == 0).any()):
+                is_labelled = y_true[:, i] == y_true[:, i]
+                ap_list.append(average_precision_score(y_true[is_labelled, i].numpy(),
+                                                       y_pred[is_labelled, i].numpy()))
+
+        # Raising rather than returning nan, for the reason ROCAUCEvaluator spells out: Logger
+        # tracks the best epoch with torch.max, which a nan would silently propagate through, so the
+        # whole run would report nan instead of failing.
+        if not ap_list:
+            raise ValueError(f"AP is undefined for a split in which no task carries both a positive "
+                             f"and a negative; got {len(y_true)} graphs over {y_true.size(1)} tasks")
+
+        return {self.eval_metric: sum(ap_list) / len(ap_list)}
+
+
+class MultiTargetMAEEvaluator:
+    # Multi-target graph regression (Peptides-struct's 11 targets): the mean absolute error over all
+    # target entries, i.e. the mean over the targets of each target's MAE. ZINCEvaluator is NOT
+    # reusable here — it divides the element sum by the number of GRAPHS, which is the MAE only for
+    # a one-target y and returns 11x the MAE on this one. The metric name has to stay 'mae' because
+    # utils/logger.py derives its min-vs-max direction from the name alone, so a regression metric
+    # under any other name would report the worst epoch as the best. The 11 targets are already
+    # standardized to zero mean and unit variance upstream in LRGB's own processing, which is the
+    # scale the benchmark reports on, so nothing is rescaled here.
+    def __init__(self, **kwargs):
+        self.eval_metric = 'mae'
+
+    def eval(self, input_dict):
+        if not 'y_true' in input_dict:
+            raise RuntimeError("Missing key of y_true")
+        if not 'y_pred' in input_dict:
+            raise RuntimeError("Missing key of y_pred")
+
+        y_true, y_pred = input_dict['y_true'], input_dict['y_pred']
+
+        """
+            y_true: numpy ndarray or torch tensor of shape (num_graphs, num_targets)
+            y_pred: numpy ndarray or torch tensor of shape (num_graphs, num_targets)
+        """
+
+        y_true = y_true.detach().cpu()
+        y_pred = y_pred.detach().cpu()
+
+        return {self.eval_metric: (y_pred - y_true).abs().mean().item()}
