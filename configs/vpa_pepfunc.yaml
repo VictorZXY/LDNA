@@ -1,0 +1,40 @@
+experiment_name: vpa_pepfunc
+
+# Model specific arguments/hyperparameters
+model: GNN-VPA
+model_args:
+  hidden_channels: 1024
+  out_channels: 1024
+  num_layers: 3
+  num_trans_layers: 1
+  num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
+  dropout: 0.137215
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: Peptides-func
+data_args:
+  root: data/
+  batch_size: 64
+
+# Training specific arguments/hyperparameters
+cuda: 3
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000197181
+    weight_decay: 4.69445e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: APEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

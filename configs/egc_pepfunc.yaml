@@ -3,12 +3,12 @@ experiment_name: egc_pepfunc
 # Model specific arguments/hyperparameters
 model: EGC
 model_args:
-  hidden_channels: 256
-  out_channels: 256
-  num_layers: 7
+  hidden_channels: 1024
+  out_channels: 1024
+  num_layers: 3
   use_multi_aggregators: True
   num_pred_layers: 3
-  dropout: 0.144427
+  dropout: 0.137215
   readout: attention
   residual: true
 
@@ -19,7 +19,7 @@ data_args:
   batch_size: 64
 
 # Training specific arguments/hyperparameters
-cuda: 1
+cuda: 3
 seed: 42
 train_args:
   runs: 3
@@ -28,8 +28,8 @@ train_args:
   loss_fn: BCEWithLogitsLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 0.000118959
-    weight_decay: 2.22642e-06
+    lr: 0.000197181
+    weight_decay: 4.69445e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

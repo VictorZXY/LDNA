@@ -1,0 +1,40 @@
+experiment_name: vpa_cifar10
+
+# Model specific arguments/hyperparameters
+model: GNN-VPA
+model_args:
+  hidden_channels: 512
+  out_channels: 512
+  num_layers: 4
+  num_trans_layers: 1
+  num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
+  dropout: 0.158603
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: CIFAR10
+data_args:
+  root: data/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 3
+  epochs: 150
+  eval_interval: 10
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.00112901
+    weight_decay: 2.0915e-05
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: MNISTEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

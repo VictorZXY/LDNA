@@ -3,14 +3,14 @@ experiment_name: gin_cifar10
 # Model specific arguments/hyperparameters
 model: GIN
 model_args:
-  hidden_channels: 256
-  out_channels: 256
-  num_layers: 6
+  hidden_channels: 512
+  out_channels: 512
+  num_layers: 4
   num_trans_layers: 1
   num_pred_layers: 3
   eps: 0.0
   train_eps: True
-  dropout: 0.12787
+  dropout: 0.158603
   readout: attention
   residual: true
 
@@ -21,7 +21,7 @@ data_args:
   batch_size: 256
 
 # Training specific arguments/hyperparameters
-cuda: 1
+cuda: 0
 seed: 42
 train_args:
   runs: 3
@@ -30,8 +30,8 @@ train_args:
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 0.000664714
-    weight_decay: 3.24767e-06
+    lr: 0.00112901
+    weight_decay: 2.0915e-05
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max
