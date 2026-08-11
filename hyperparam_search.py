@@ -78,13 +78,16 @@ BATCH_SIZES = {'ogbg-molhiv': 256, 'ogbg-molpcba': 512, 'ZINC': 128, 'MNISTSuper
                'ogbg-code2': 128, 'Questions': None, 'ogbn-arxiv': None}
 
 # Graph-level width choices, as a per-dataset override on the standard {128, 256, 512, 1024}.
-# `ogbg-ppa` is the one entry: a reduced protocol (100 epochs, 2 runs, {128, 256}) is what makes
-# 158,100 graphs at 611 steps/epoch affordable, and the two dropped widths are largely unreachable
-# there anyway — `_graph_peak_gib` puts h=512 at ~40 GiB and h=1024 at ~80 GiB for a depth-6 model
-# on a 128-graph batch of this density, against a 47 GiB card. Expressed as a dict with a default
-# rather than a parallel branch so that every other dataset reaches `suggest_categorical` with an
-# argument equal to the literal it used before, leaving TPE's draws at a given seed unchanged.
-GRAPH_WIDTHS = {'ogbg-ppa': (128, 256)}
+# `ogbg-ppa` is the one entry, and it is a COMPUTE decision rather than a memory one: the memory
+# model admits h=512 at L in [2, 5] and h=1024 at L=2, so restricting the box costs feasible points
+# and buys wall clock on the most expensive job in the project. It began at {128, 256}; 512 was
+# added on 2026-08-11 after the first 25-trial round converged to h=256 — the box's own upper bound —
+# with the best trial unimproved for the following twelve, i.e. the box was exhausted rather than the
+# budget. 1024 stays out: it needs 46 GiB even at L=3 before the heaviest-baseline factor, so no
+# config using it could be ranked on the A6000s at all. Expressed as a dict with a default rather
+# than a parallel branch so that every other dataset reaches `suggest_categorical` with an argument
+# equal to the literal it used before, leaving TPE's draws at a given seed unchanged.
+GRAPH_WIDTHS = {'ogbg-ppa': (128, 256, 512)}
 GRAPH_DEFAULT_WIDTHS = (128, 256, 512, 1024)
 
 # Predicted peak RESERVED memory for a graph-level batch, the counterpart of the node model above
@@ -111,6 +114,18 @@ GRAPH_MEM_GIB_OVERHEAD = 2.1
 # to (128 ppa graphs, i.e. ppa's own configured batch size).
 GRAPH_EDGE_ENTRIES = {'ogbg-ppa': 4_532}
 GRAPH_MEM_REF_ENTRIES = 580_096
+# The constants above are fit on LDNA, but what the prune has to protect is the RANKING, which
+# broadcasts the tuned config to eleven baselines. `PNA` is the heaviest of them here: measured at
+# ppa's shape (243 nodes, degree 18.6, batch 24 scaled to 128, h=512/L=4) it reserves 36.3 GiB
+# against LDNA's 31.7 — 1.14x, and 19.3M parameters against 4.7M. The ratio is far below the 13x-vs-2x
+# `post_nn` input widths would suggest, because the peak is per-edge message activations rather than
+# the pooled term. A trial LDNA can run but PNA cannot is useless: it would be selected, broadcast,
+# and then fail at ranking time.
+GRAPH_MEM_HEAVIEST_FACTOR = 1.14
+# Where the RANKING runs, which is not necessarily where the search runs. ogbg-ppa is searched on the
+# H100 (95 GB, so a 0.85 budget of 79.5 GiB prunes nothing up to h=512/L=8) and ranked on the 49 GB
+# A6000s. Without this the search would happily select a config that cannot be ranked at all.
+GRAPH_RANKING_BUDGET_GIB = 40.29
 
 
 def _node_peak_gib(dataset: str, hidden_channels: int, num_layers: int) -> float:
@@ -741,16 +756,24 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
     if node_level:
         peak = _node_peak_gib(dataset, hidden_channels, num_layers)
     elif dataset in GRAPH_EDGE_ENTRIES:
-        peak = _graph_peak_gib(dataset, hidden_channels, num_layers, batch_size)
+        # Scaled to the heaviest baseline, because a config is only useful if the whole ranking can
+        # run it, not just the model being searched.
+        peak = _graph_peak_gib(dataset, hidden_channels, num_layers,
+                               batch_size) * GRAPH_MEM_HEAVIEST_FACTOR
     else:
         peak = None
     if peak is not None and torch.device(device).type == 'cuda':
         budget = mem_fraction * torch.cuda.get_device_properties(
             torch.device(device).index).total_memory / 1024 ** 3
+        # A graph-level search may own a bigger card than the ranking will: ppa is searched on the
+        # H100 and ranked on the A6000s. Take the tighter of the two, or the search selects configs
+        # that cannot be ranked anywhere.
+        if not node_level and dataset in GRAPH_EDGE_ENTRIES:
+            budget = min(budget, GRAPH_RANKING_BUDGET_GIB)
         if peak > budget:
             print(f"Trial {trial.number}: pruned as infeasible — predicted peak {peak:.2f} GiB "
-                  f"exceeds the {budget:.2f} GiB budget (hidden_channels={hidden_channels}, "
-                  f"num_layers={num_layers})")
+                  f"(heaviest baseline) exceeds the {budget:.2f} GiB budget "
+                  f"(hidden_channels={hidden_channels}, num_layers={num_layers})")
             raise optuna.TrialPruned()
 
     # --- Train model with these hyperparameters ---
@@ -837,12 +860,14 @@ def main(args):
             depths = range(2, NODE_MAX_LAYERS.get(args.dataset, 8) + 1)
             budget = mem_fraction * torch.cuda.get_device_properties(
                 torch.device(args.device).index).total_memory / 1024 ** 3
+            if not node_level:
+                budget = min(budget, GRAPH_RANKING_BUDGET_GIB)
             widths = NODE_WIDTHS[args.dataset] if node_level \
                 else GRAPH_WIDTHS.get(args.dataset, GRAPH_DEFAULT_WIDTHS)
             box = [(h, l) for h in widths for l in depths
                    if (_node_peak_gib(args.dataset, h, l) if node_level
-                       else _graph_peak_gib(args.dataset, h, l,
-                                            BATCH_SIZES[args.dataset])) <= budget]
+                       else _graph_peak_gib(args.dataset, h, l, BATCH_SIZES[args.dataset])
+                       * GRAPH_MEM_HEAVIEST_FACTOR) <= budget]
             print(f"Memory-admissible (hidden_channels, num_layers) within {budget:.2f} GiB "
                   f"(mem_fraction {mem_fraction}): {len(box)} of "
                   f"{len(widths) * len(depths)} — {box}")
@@ -859,6 +884,39 @@ def main(args):
             params = json.loads(args.enqueue)
             print(f"Enqueued starting point: {params}")
             study.enqueue_trial(params)
+
+        # Transplant a previous round's COMPLETED trials as observations, without re-running them.
+        # `--enqueue` cannot do this job: it schedules one point to be evaluated, so it costs a full
+        # trial and contributes a single observation. The distinction matters when the follow-up
+        # budget is small — TPE samples its first `n_startup_trials` (10) at random, so a 10-trial
+        # round with no history would be 10 random draws and the sampler would never engage at all.
+        # Seeded, it models from trial one.
+        #
+        # The seeded trials' distributions are declared as the CURRENT ones rather than the ones they
+        # were drawn under. That is what lets a widened box reuse a narrower box's history: every
+        # seeded value is still a member of the widened choice set, so the observation is valid, and
+        # optuna would otherwise reject the study for inconsistent distributions on the same name.
+        if args.seed_from:
+            with open(args.seed_from) as f:
+                seeds = json.load(f)
+            widths = list(NODE_WIDTHS[args.dataset]) if node_level \
+                else list(GRAPH_WIDTHS.get(args.dataset, GRAPH_DEFAULT_WIDTHS))
+            distributions = {
+                'hidden_channels': optuna.distributions.CategoricalDistribution(widths),
+                'num_layers': optuna.distributions.IntDistribution(
+                    2, NODE_MAX_LAYERS.get(args.dataset, 8)),
+                'dropout': optuna.distributions.FloatDistribution(0.1, 0.7),
+                'lr': optuna.distributions.FloatDistribution(
+                    1e-4 if node_level else 1e-5, 5e-2 if node_level else 1e-2, log=True),
+                'weight_decay': optuna.distributions.FloatDistribution(1e-6, 1e-3, log=True),
+            }
+            for seed in seeds:
+                study.add_trial(optuna.trial.create_trial(
+                    params=seed['params'],
+                    distributions={k: distributions[k] for k in seed['params']},
+                    value=seed['value']))
+            print(f"Seeded {len(seeds)} completed trial(s) from {args.seed_from}; the sampler models "
+                  f"from them instead of spending this round's budget on random startup draws")
 
         study.optimize(
             lambda trial: objective(trial, dataset=args.dataset, device=args.device,
@@ -907,6 +965,10 @@ if __name__ == '__main__':
     parser.add_argument('--mem_fraction', type=float, default=None)
     # JSON dict of hyperparameters to evaluate as trial 0, e.g. a previous search's best config.
     parser.add_argument('--enqueue', type=str, default=None)
+    parser.add_argument('--seed_from', type=str, default=None,
+                        help='JSON list of {params, value} from a previous round, added as\n'
+                             'completed observations so a short follow-up round has a model\n'
+                             'to sample from instead of spending its budget on random draws')
     # Left unset the cap resolves per level in main(): 50 graph-level epochs, or NODE_SEARCH_EPOCHS
     # on the node-level datasets, where one epoch is one optimizer step.
     parser.add_argument('--epochs', type=int, default=None)
