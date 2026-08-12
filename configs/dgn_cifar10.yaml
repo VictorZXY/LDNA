@@ -6,7 +6,7 @@ model_args:
   hidden_channels: 512
   out_channels: 512
   num_layers: 4
-  aggregators: [mean, dir1-dx, dir1-av, dir2-dx, dir2-av]
+  aggregators: [mean, dir1-dx, dir2-dx]
   scalers: [identity, amplification, attenuation]
   num_eig_vec: 2
   num_pre_layers: 1
