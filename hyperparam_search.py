@@ -703,7 +703,7 @@ def _train_LDNA_code2(
 def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
               min_delta: float = 1e-3, device: str = 'cuda:0',
               mem_fraction: float = 0.30,
-              fix_hidden_channels=None, fix_num_layers=None) -> float:
+              fix_hidden_channels=None, fix_num_layers=None, max_num_layers=None) -> float:
     # --- Search spaces for the hyperparameters ---
     # Architecture can be pinned via `fix_*` to search only the training knobs (dropout/lr/wd).
     # This is faster: it drops the expensive large-model trials and shrinks the search space,
@@ -722,8 +722,15 @@ def objective(trial, dataset: str, epochs: int = 50, patience: int = 20,
         else trial.suggest_categorical('hidden_channels',
                                        list(NODE_WIDTHS[dataset]) if node_level
                                        else list(GRAPH_WIDTHS.get(dataset, GRAPH_DEFAULT_WIDTHS)))
+    # `max_num_layers` narrows the depth range for one run without touching the dataset's own
+    # bound. It exists for a width-conditional probe: on ogbg-ppa the memory prune admits
+    # h=512 only to L=4, so a probe pinned to that width should sample [2, 4] directly rather
+    # than propose depths the prune will reject — those rejections are free (the prune fires
+    # before any model is built) but they make the trial count mean two different things.
+    depth_cap = max_num_layers if max_num_layers is not None \
+        else NODE_MAX_LAYERS.get(dataset, 8)
     num_layers = fix_num_layers if fix_num_layers is not None \
-        else trial.suggest_int('num_layers', 2, NODE_MAX_LAYERS.get(dataset, 8))
+        else trial.suggest_int('num_layers', 2, depth_cap)
     dropout = trial.suggest_float('dropout', 0.1, 0.7)
     batch_size = BATCH_SIZES[dataset]
     # Node level widens the lr range in both directions. The published full-graph arxiv configs sit
@@ -923,7 +930,8 @@ def main(args):
                                     epochs=epochs, patience=args.patience,
                                     min_delta=args.min_delta, mem_fraction=mem_fraction,
                                     fix_hidden_channels=args.fix_hidden_channels,
-                                    fix_num_layers=args.fix_num_layers),
+                                    fix_num_layers=args.fix_num_layers,
+                                    max_num_layers=args.max_num_layers),
             n_trials=args.n_trials,
             catch=(RuntimeError,),
         )
@@ -979,6 +987,9 @@ if __name__ == '__main__':
     # width/depth as well. Faster search when set (drops large-model trials, lower-dim space).
     parser.add_argument('--fix_hidden_channels', type=int, default=None)
     parser.add_argument('--fix_num_layers', type=int, default=None)
+    parser.add_argument('--max_num_layers', type=int, default=None,
+                        help='upper bound on num_layers for this run only; use when a pinned\n'
+                             'width makes the deeper part of the range memory-infeasible')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--log_dir', type=str, default='out/logs/')
 
