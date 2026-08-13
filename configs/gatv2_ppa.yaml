@@ -5,9 +5,9 @@ model: GATv2
 model_args:
   hidden_channels: 256
   out_channels: 256
-  num_layers: 6
+  num_layers: 4
   num_pred_layers: 3
-  dropout: 0.1
+  dropout: 0.104528
   readout: attention
   residual: true
 
@@ -18,7 +18,7 @@ data_args:
   batch_size: 128
 
 # Training specific arguments/hyperparameters
-cuda: 1
+cuda: 0
 seed: 42
 train_args:
   runs: 2
@@ -27,8 +27,8 @@ train_args:
   loss_fn: CrossEntropyLoss
   optimizer: Adam
   optimizer_kwargs:
-    lr: 1.5e-3
-    weight_decay: 1.5e-6
+    lr: 0.000917293
+    weight_decay: 1.15598e-06
   scheduler: ReduceLROnPlateau
   scheduler_kwargs:
     mode: max

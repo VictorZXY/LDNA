@@ -1,0 +1,42 @@
+experiment_name: dgn_cifar10_s43
+
+# Model specific arguments/hyperparameters
+model: DGN
+model_args:
+  hidden_channels: 512
+  out_channels: 512
+  num_layers: 4
+  aggregators: [mean, dir1-dx, dir2-dx]
+  scalers: [identity, amplification, attenuation]
+  num_eig_vec: 2
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.158603
+  readout: attention
+  residual: true
+
+# Dataset specific arguments/hyperparameters
+dataset: CIFAR10
+data_args:
+  root: data/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 43
+train_args:
+  runs: 1
+  epochs: 150
+  eval_interval: 10
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.00112901
+    weight_decay: 2.0915e-05
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: MNISTEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
