@@ -13,9 +13,9 @@
   `ldna_net.py` — plus the baseline wrappers), `data_utils/` (sorting/canonicalization,
   transforms, dataset classes), `utils/` (resolver, evaluators, logger, tee), `scripts/`
   (operational helpers), and `requirements.txt`.
-- `hyperparam_search.py` tunes LDNA on all five graph-level datasets (ogbg-molhiv,
-  ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2) and on the two wired node-level ones
-  (Questions, ogbn-arxiv). Search mechanics — ranges, pruning, plateau early-stopping, the
+- `hyperparam_search.py` tunes LDNA on all nine graph-level datasets (ogbg-molhiv,
+  ogbg-molpcba, ZINC, MNISTSuperpixels, ogbg-code2, CIFAR10, Peptides-func, Peptides-struct,
+  ogbg-ppa) and on the two wired node-level ones (Questions, ogbn-arxiv). Search mechanics — ranges, pruning, plateau early-stopping, the
   50-epoch search cap (vs 150 final), and gradient clipping — live in
   `.claude/experiments.md` (§ Search spaces), together with the node-level space, whose
   epoch-counted settings all differ because a full-graph epoch is one optimizer step: no LR
@@ -50,19 +50,30 @@
   `GNN-VPA` (`models/vpa.py`), and `DGN` (`models/dgn.py`). `GIN` xor `GINE` runs per dataset by
   edge availability. Per-model backbones, `DGN`'s directional aggregators, and the GIN/GINE rule
   are in `.claude/experiments.md` § Baselines.
-- DGN is wired for all five graph-level datasets. Its per-node directional field is attached by
+- DGN is wired for all nine graph-level datasets. Its per-node directional field is attached by
   the resolver only when the model is `DGN` and forwarded by `train.py` only when present, so
   every other baseline's call path is unchanged; the field is the low-frequency Laplacian
-  eigenvectors on the four molecular/image datasets and the AST depth on `ogbg-code2`. Field
-  construction, caching, measurements, and rejected alternatives are in
-  `.claude/experiments.md` § Baselines.
+  eigenvectors on the molecular/image datasets (molhiv, molpcba, ZINC, MNIST, Peptides, ppa), the
+  AST depth on `ogbg-code2`, and the **superpixel coordinates** on `CIFAR10`, whose directed 8-NN
+  connectivity makes the eigenvector path silently wrong (`torch.linalg.eigh` reads one triangle,
+  so it would decompose a matrix other than the one it was handed; `add_eig_vec` now raises on an
+  asymmetric `edge_index` rather than returning a plausible field). That substitution is the DGN
+  paper's own for CIFAR10, but it is also the one place a baseline receives input the other eleven
+  configs do not — see the CIFAR10 results-log row. Its aggregator sets follow the paper's own
+  per-dataset choices minus the members PNA also uses; the one knowing exception, `ogbg-molpcba`,
+  is recorded in § Results log. Field construction, caching, measurements, and rejected
+  alternatives are in `.claude/experiments.md` § Baselines.
 - `ogbg-code2` is wired as an edge-less (GIN-family) dataset with a dedicated
   sequence-prediction path (`ASTNodeEncoder` + `Code2Head` in `models/code2.py`, plus a guarded
   `train.py` / `hyperparam_search.py` fork); the feature lexsort is skipped because the AST DFS
-  order is already canonical. `ogbg-ppa` is out of scope: featureless nodes make the
-  feature-based sort non-permutation-invariant, which LDNA's MLP aggregator requires (the sort
-  is a correctness requirement, not a performance lever). Both are covered in
-  `.claude/experiments.md` § Datasets.
+  order is already canonical. `ogbg-ppa` was out of scope for exactly that reason — featureless
+  nodes make the feature-based sort non-permutation-invariant, which LDNA's MLP aggregator
+  requires (the sort is a correctness requirement, not a performance lever) — and was
+  **readmitted 2026-08-04** once a featureless order was available: `canonicalize_graphs`
+  (pynauty, disk-cached, 2.87 ms/graph) supplies it and LDNA reads it through `rank_mode:
+  position`, which `utils/resolver.py` *requires* on ppa and raises otherwise, since a
+  feature-mode rank over a constant node feature ties every node and turns the gate into a silent
+  no-op. Both are covered in `.claude/experiments.md` § Datasets.
 - Node-level (transductive, per-node) prediction is wired end to end, without sampling or
   layer-wise inference: `data_utils/preprocess.py: node_rank` / `add_node_ranks` compute the
   tie-aware canonical rank **without permuting the graph** (the rank is permutation-equivariant,
@@ -176,9 +187,20 @@
 
 ## Graph-level experiment protocol (complete)
 - The graph-level protocol (tune LDNA → broadcast the tuned shared config to all baselines →
-  rank → log) has been run on all five datasets, plus the `DGN` baseline. Objectives, the
+  rank → log) has been run on all nine datasets, plus the `DGN` baseline. Objectives, the
   per-dataset tuned configs, and final rankings live in `.claude/experiments.md`
   (§ Experiment queue, § Results log), the source of truth.
+- **The expansion (2026-08-05 → 08-24) closed the three gaps it was queued for and did not
+  extend LDNA's top-2 record.** `CIFAR10` (LDNA #3 of 12), `Peptides-func` (#2, but ranks 2–12
+  are one statistical tie), `Peptides-struct` (#9) and `ogbg-ppa` (#7) add the long-range,
+  multi-target-regression and featureless axes the suite lacked; three of the four miss the
+  primary objective, and ppa and Peptides-struct are now the project's two worst placements.
+  Two structural findings came out of it rather than out of LDNA's own numbers: on `ogbg-ppa`
+  five of the twelve configs sit near chance because this repo's GCN/SAGE/GAT/GATv2/EGC wrappers
+  read no `edge_attr` and ppa's entire signal is in its edges, and on `CIFAR10` DGN's 8.5-point
+  lead traces to its directional field being the coordinates no other model receives. `ogbg-ppa`
+  ran a **reduced protocol** (runs=2, 25 search trials, widths {128, 256}); every deviation is
+  disclosed in § Results log.
 - Helper scripts (in `scripts/`): `scripts/broadcast.py` writes the tuned shared knobs into
   every baseline config and creates the `GNN-VPA` config (`python scripts/broadcast.py
   --dataset <D> --hidden_channels .. --num_layers .. --dropout .. --lr .. --weight_decay ..
@@ -211,7 +233,10 @@
 - Expand `README.md` to describe the project, setup, and usage.
 - Add more baseline models for experiments.
 - Add more **graph-level** datasets. (Node-level is closed — see § Partial components;
-  adding node datasets would re-run a question already answered.)
+  adding node datasets would re-run a question already answered.) The 2026-08 expansion took the
+  suite from five to nine; the three axes it was built to close — long-range dependency,
+  multi-target regression, featureless graphs — are now covered, so a further dataset needs a
+  new reason, not just a new name.
 - Add graph transformer implementations and run them on the benchmark datasets.
 
 ---
