@@ -805,7 +805,8 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
   heaviest datasets (`ogbg-molpcba`, `ogbg-code2`). Drive it via `ssh ee-tiamat`; the repo
   (`~/Projects/LDNA`) and conda env (`LDNA`) mirror this host, and code syncs through GitHub
   (push here → `git pull` there). Results (`out/logs/`, `logs/`) are gitignored, so copy them
-  back with `scp` and record numbers in § Results log here. Exact SSH/job commands are in
+  back with `scp` (checkpoints to `/mnt/data`, via the `out/checkpoints` symlink) and record
+  numbers in § Results log here; `ee-tiamat` keeps no data or results once they are archived. Exact SSH/job commands are in
   the two-machine setup memory (summarised in `.claude/project_state.md` § Graph-level experiment protocol).
 
 ---

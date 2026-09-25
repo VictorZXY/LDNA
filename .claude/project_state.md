@@ -209,8 +209,9 @@
 - GPU policy: prefer idle GPUs, keep them busy, share freely, never OOM anyone (see
   `.claude/experiments.md` § Compute & parallelism).
 - Compute spans two machines: local `ee-kraken` (4× RTX A6000 49GB) and remote `ee-tiamat`
-  (H100 95GB); the heaviest datasets (`ogbg-molpcba`, `ogbg-code2`) suit the H100 and are cached
-  under `data/` on both. SSH access, repo/env mirroring, and GitHub sync are in
+  (H100 95GB); the heaviest datasets (`ogbg-molpcba`, `ogbg-code2`) suit the H100. All datasets,
+  logs and checkpoints are archived on `ee-kraken` under `/mnt/data` (symlinked from `data/` and
+  `out/checkpoints`); `ee-tiamat` holds no data or results between jobs. SSH access, repo/env mirroring, and GitHub sync are in
   `.claude/experiments.md` § Compute & parallelism.
 
 ---
