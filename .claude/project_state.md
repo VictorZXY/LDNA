@@ -196,10 +196,13 @@
   multi-target-regression and featureless axes the suite lacked; three of the four miss the
   primary objective, and ppa and Peptides-struct are now the project's two worst placements.
   Two structural findings came out of it rather than out of LDNA's own numbers: on `ogbg-ppa`
-  five of the twelve configs sit near chance because this repo's GCN/SAGE/GAT/GATv2/EGC wrappers
-  read no `edge_attr` and ppa's entire signal is in its edges, and on `CIFAR10` DGN's 8.5-point
+  five of the twelve configs sit near chance because none of this repo's GCN/SAGE/GAT/GATv2/EGC
+  wrappers can carry `edge_attr` into a node state (GCN/SAGE/EGC never read it; GAT/GATv2 read it
+  only inside an attention softmax that cancels over a constant node feature) and ppa's entire
+  signal is in its edges, and on `CIFAR10` DGN's 8.5-point
   lead traces to its directional field being the coordinates no other model receives. `ogbg-ppa`
-  ran a **reduced protocol** (runs=2, 25 search trials, widths {128, 256}); every deviation is
+  ran a **reduced protocol** (runs=2, 25 search trials, widths {128, 256}; the code's width entry
+  now also admits 512, left from a second search round that was not adopted); every deviation is
   disclosed in § Results log.
 - Helper scripts (in `scripts/`): `scripts/broadcast.py` writes the tuned shared knobs into
   every baseline config and creates the `GNN-VPA` config (`python scripts/broadcast.py
