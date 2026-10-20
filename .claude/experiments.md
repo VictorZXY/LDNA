@@ -573,9 +573,11 @@ direction for a prune. Refit on eight A6000 points (LDNA fwd+bwd+step): `h=256/L
 32/64/128/256 → 5.00/9.94/19.85/39.67 GiB, `h=512/L=6` batch 64 → 19.67, `h=1024/L=4` batch 64 →
 27.62, `h=128/L=8` batch 128 → 13.21, `h=256/L=3` batch 128 → 11.04. Those are **allocated** bytes
 while `mem_fraction` caps **reserved**; the measured gap on the same runs is 0.96–2.02 GiB, carried
-as additive headroom at the worst observed value for the reason the node model gives. Admissible
-box at batch 128: **8 of 14** points at the graph-level default `--mem_fraction 0.30` (`h=256`
-capped at `L=3`), **14 of 14** at `0.85`. **A ppa search should own its card and pass
+as additive headroom at the worst observed value for the reason the node model gives. On an
+A6000 at batch 128 the graph-level default `--mem_fraction 0.30` leaves only the narrow, shallow
+corner of the box, while `0.85` admits all **14 of 14** points of the reported {128, 256} box. The
+exact count moves with the card and the memory constants, so read it from the search's own output
+rather than from here. **A ppa search should own its card and pass
 `--mem_fraction 0.85`**; `main` now prints the admissible box for graph-level datasets too, before
 spending anything.
 
@@ -924,20 +926,23 @@ regression, and featureless graphs; these four close all three):**
 > and `CIFAR10` are the safe additions, and why any future candidate carrying learned continuous
 > node embeddings deserves this check before it is wired.
 
-- [ ] **`CIFAR10` superpixels** — the smallest diff, do it first. `GNNBenchmarkDataset(name='CIFAR10')`
-      in `utils/resolver.py`, reusing the `MNISTSuperpixels` branch verbatim (`T.Cartesian` +
-      `RemoveEdgeAttr`, `sort_graphs`, `MNISTEvaluator`, `nn.Linear(num_features, hidden)` encoder).
-      **Check its split**: MNIST has no validation set and the resolver silently aliases val to test
-      (see its dataset row); confirm whether CIFAR10 does the same and disclose it if so. Edge-less
-      after `RemoveEdgeAttr`, so **GIN**, not GINE.
-- [ ] **`Peptides-func` and `Peptides-struct`** — `LRGBDataset(name=...)`, one resolver branch
-      covering both since they share graphs and differ only in targets. Atom-level node features and
-      bond `edge_attr`, so the existing feature lexsort and the `models.Encoder` / `nn.Embedding`
-      encoder pattern apply as they do for ZINC — **GINE**. Two new evaluators: multi-label **AP**
-      for `-func` (the OGB AP computation over 10 tasks) and **multi-target MAE** for `-struct`
-      (mean over the 11 targets, normalized per the LRGB protocol — read the protocol, do not
-      invent the normalization). `BCEWithLogitsLoss` and `L1Loss` respectively.
-- [x] **`ogbg-ppa` via nauty** (implemented 2026-08-05; tuning and ranking still to run). All four
+- [x] **`CIFAR10` superpixels** (implemented 2026-08-05; tuned and ranked, § Results log).
+      `GNNBenchmarkDataset(name='CIFAR10')` in `utils/resolver.py`, on the `MNISTSuperpixels`
+      pipeline (`T.Cartesian` + `RemoveEdgeAttr`, `sort_graphs`, `MNISTEvaluator`,
+      `nn.Linear(num_features, hidden)` encoder) but in its own branch: it ships a **real validation
+      split**, so it takes three separate split datasets with no val-to-test aliasing, and DGN's
+      field is the superpixel coordinates (`AddPosField`) because the 8-NN `edge_index` is directed
+      (§ Datasets). Edge-less after `RemoveEdgeAttr`, so **GIN**, not GINE.
+- [x] **`Peptides-func` and `Peptides-struct`** (implemented 2026-08-05; tuned and ranked,
+      § Results log). `LRGBDataset(name=...)`, one resolver branch covering both since they share
+      graphs and differ only in targets. The features are OGB's molecular vocabulary, so the
+      feature lexsort applies and the encoders are `AtomEncoder` / `BondEncoder` as on molhiv —
+      **GINE**. Two new evaluators: `APEvaluator` for `-func` (OGB's per-task AP, unweighted mean
+      over the 10 tasks) and `MultiTargetMAEEvaluator` for `-struct` (mean absolute error over all
+      11 target entries); `BCEWithLogitsLoss` and `L1Loss` respectively. `-struct`'s targets arrive
+      already standardized by LRGB, so nothing here normalizes them (§ Datasets).
+- [x] **`ogbg-ppa` via nauty** (implemented 2026-08-05; tuned and ranked under the reduced
+      protocol, § Results log). All four
       planned points are in: the cached canonicalization, the DGN ordering constraint, the
       mandatory `rank_mode: position` guard, and GINE. Configs are the 11 hand-authored
       `*_ppa.yaml` plus `vpa_ppa.yaml` from `scripts/broadcast.py`. What the implementation
@@ -978,8 +983,8 @@ regression, and featureless graphs; these four close all three):**
          `add_eig_vec` that could have blocked it: over 3,041 evenly-sampled graphs, **0%
          asymmetric `edge_index` and 0% disconnected**, so the guard passes and the eigenvector
          field does not degenerate into component indicators. Its wall-clock cost (an
-         eigendecomposition per graph over 158,100 graphs) is **not** measured — the one
-         remaining unknown before `dgn_ppa` runs.
+         eigendecomposition per graph over 158,100 graphs) was not measured ahead of time;
+         `dgn_ppa` has since run (§ Results log).
       7. `degree_histogram` (PNA/DGN) over the 78,200-graph train split takes **17.4 s**,
          cheap enough to leave uncached.
 
@@ -1014,10 +1019,10 @@ run → rank → append a § Results log row. Suggested order, cheapest and lowe
       2–12 are one statistical tie) and `Peptides-struct` (tuned h256/l6, ranked 2026-08-07,
       **LDNA #9 of 12**). They close the **long-range** gap, and the pair's split verdict on the
       *same graphs* is the most informative thing the expansion produced.
-- [x] `ogbg-ppa` — ran alone, reduced protocol, ranked 2026-08-24, **LDNA #7 of 12**. Wiring, the nauty path and the cache are done
-      (§ Implementation queue); what remains is the reduced-protocol search (~25 trials,
-      `--mem_fraction 0.85`) and the 12-config ranking. The binding constraint is host RAM, not
-      compute: 31.1 GiB resident and 61.4 GiB peak per process means the ranking cannot fan out
+- [x] `ogbg-ppa` — ran alone, reduced protocol, ranked 2026-08-24, **LDNA #7 of 12**. Tuned by
+      the reduced-protocol search (25 trials, `--mem_fraction 0.85`) on top of the wiring, nauty
+      path and cache in § Implementation queue, then ranked across all 12 configs. The binding
+      constraint is host RAM, not compute: 31.1 GiB resident and 61.4 GiB peak per process means the ranking cannot fan out
       across the four GPUs the way the other datasets do (§ Search spaces). The `MalNetTiny`
       de-risking run is dropped — the path was validated directly (see its note in § Datasets).
 
