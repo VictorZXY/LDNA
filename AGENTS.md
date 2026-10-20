@@ -64,7 +64,7 @@ For model-optimization or experiment tasks, also read `.claude/experiments.md` �
 - `utils/resolver.py`: loads datasets, applies preprocessing, and builds the requested model.
 - `utils/evaluator.py` and `utils/logger.py`: evaluators and training logs.
 - `utils/tee.py`: tees run output to a log file.
-- `scripts/`: helpers and secondary entry points, run from the repo root — `broadcast.py` (write tuned shared knobs into all baseline configs), `run_jobs.sh` (run configs serially on one GPU), `pairwise_eval.py` (pairwise graph-distinguishing evaluation — the BREC RPC protocol; run as `python -m scripts.pairwise_eval`), `train_fold.py` (train a single CV fold, best-of-N seeds; run as `python -m scripts.train_fold`).
+- `scripts/`: helpers and secondary entry points, run from the repo root — `broadcast.py` (write tuned shared knobs into all baseline configs), `run_jobs.sh` (run configs serially on one GPU), `pairwise_eval.py` (pairwise graph-distinguishing evaluation — the BREC RPC protocol; run as `python -m scripts.pairwise_eval`), `train_fold.py` (train a single CV fold, best-of-N seeds; run as `python -m scripts.train_fold`), `val_selected.py` (the validation-selected test next to `best_test`, computed offline from saved logger pickles or `.txt` logs; run as `python -m scripts.val_selected`).
 - `configs/`: YAML experiment configs.
 - `.claude/`: agent-facing project notes.
 

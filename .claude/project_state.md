@@ -146,6 +146,12 @@
   the same gap and is **deliberately left alone**: BREC's committed 321 is a headline result, its
   protocol is init-sensitive (that is the whole point of `gate_init_std`), and changing the code
   without re-running would leave that number unreproducible. Revisit only if BREC is ever re-run.
+- A **validation-selected test** column (test at the best-validation epoch) sits alongside the
+  reported `best_test`, computed offline from the saved curves by `scripts/val_selected.py`, for
+  every graph-level ranking, Questions and the node-level gate ablation. LDNA's rank is unchanged
+  except on molhiv (#1 → #5, inside a five-way statistical tie); on Questions it becomes tied for
+  #2, and on ogbn-arxiv the gate's paired effect turns significantly negative. Details in
+  `.claude/experiments.md` § Results log.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -246,16 +252,14 @@
 ---
 
 ## Open questions
-- **Single-factor graph-level gate ablation — the one measurement the project still owes.**
-  Commit `2278661` added the rank gate and removed `lin_aggr` in the same change, so the
-  graph-level result compares {gate, no lin_aggr} against {no gate, lin_aggr} and never isolated
-  the gate; no graph-level config has run `rank_mode: none`. The node-level ablation is the only
-  single-factor one, and it is null. Running `rank_mode: none` against `feature` at the committed
-  tuned configs on ZINC / MNIST / molhiv (3+ runs, identical seeds) would settle what the gate
-  contributes at graph level. It is **not** required for the performance claim — the rankings
-  compare LDNA against baselines under identical configs whatever is inside LDNA — but it is
-  required before describing the gate as the mechanism behind those rankings. Details and the
-  parameter-count evidence are in `.claude/experiments.md` (the EVIDENCE GAP note above § Results log).
+- **Single-factor graph-level gate ablation — running.** Commit `2278661` added the rank gate and
+  removed `lin_aggr` in the same change, so the graph-level result compares {gate, no lin_aggr}
+  against {no gate, lin_aggr} and never isolated the gate. The single-factor run is now under way:
+  config pairs `ldna_{zinc,mnist,hiv}_{gated,ungated}.yaml`, identical except `rank_mode`, one
+  process per seed (ZINC/MNIST 42–46, molhiv 42–51), paired by seed, deciding metric fixed in
+  advance (`.claude/experiments.md` § Experiment queue). It is **not** required for the performance
+  claim — the rankings compare LDNA against baselines under identical configs whatever is inside
+  LDNA — but it is required before describing the gate as the mechanism behind those rankings.
 - Test LDNA performance as a standalone aggregator component on other methods.
 
 ---
