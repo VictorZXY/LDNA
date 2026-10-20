@@ -1,0 +1,46 @@
+experiment_name: ldna_mnist_ungated
+
+# Graph-level gate ablation, UNGATED arm. Identical to its twin ldna_mnist_gated.yaml except
+# `rank_mode: none`, which keeps the gate module built but never engaged, so every LDNAConv
+# is a plain sum-of-messages aggregator. Everything else is the tuned shared
+# config of ldna_mnist_rankgate.yaml. One process per seed (`runs: 1`), launched for seeds
+# 42-46 as `--seed <s> --experiment_name ldna_mnist_ungated_s<s>`; the arms are paired by seed.
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 6
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.12787
+  readout: attention
+  residual: true
+  rank_mode: none
+
+# Dataset specific arguments/hyperparameters
+dataset: MNISTSuperpixels
+data_args:
+  root: data/mnist/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 1
+seed: 42
+train_args:
+  runs: 1
+  epochs: 150
+  eval_interval: 10
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 0.000664714
+    weight_decay: 3.24767e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: MNISTEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

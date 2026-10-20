@@ -1,0 +1,48 @@
+experiment_name: ldna_hiv_ungated
+
+# Graph-level gate ablation, UNGATED arm. Identical to its twin ldna_hiv_gated.yaml except
+# `rank_mode: none`, which keeps the gate module built but never engaged, so every LDNAConv
+# is a plain sum-of-messages aggregator. Everything else is the tuned shared
+# config of ldna_hiv_rankgate.yaml. One process per seed (`runs: 1`), launched for seeds
+# 42-51 as `--seed <s> --experiment_name ldna_hiv_ungated_s<s>`; the arms are paired by seed.
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 256
+  out_channels: 256
+  num_layers: 6
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.143105
+  readout: attention
+  residual: true
+  rank_mode: none
+
+# Dataset specific arguments/hyperparameters
+dataset: ogbg-molhiv
+data_args:
+  root: data/
+  batch_size: 256
+
+# Training specific arguments/hyperparameters
+cuda: 3
+seed: 42
+train_args:
+  runs: 1
+  epochs: 150
+  eval_interval: 10
+  loss_fn: BCEWithLogitsLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 6.29547e-05
+    weight_decay: 4.51778e-06
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+  evaluator: OGBGraphPropPredEvaluator
+  evaluator_kwargs:
+    name: ogbg-molhiv
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

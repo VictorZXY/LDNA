@@ -1119,6 +1119,19 @@ finished fold-10 rerun — see § Results log.)
       spread. (An earlier Basic-only 20-pair probe, run before pair_limit became per-category,
       is superseded by this protocol.)
 
+**Graph-level gate ablation — running (protocol pre-committed 2026-10-20).** The single-factor
+measurement the EVIDENCE GAP note below asks for. Arms are `configs/ldna_{zinc,mnist,hiv}_{gated,ungated}.yaml`,
+identical except `rank_mode` (`feature` vs `none`) at each dataset's tuned shared config; checked on
+molhiv before launch: identical parameter count (1,786,498), bit-identical initial weights and step-0
+output, identical RNG stream. One process per seed (`runs: 1`) so the seeds run in parallel across
+both machines: seeds 42–46 on ZINC (full) and MNISTSuperpixels, 42–51 on ogbg-molhiv, paired by seed.
+Deciding metric, fixed in advance: the paired difference gated − ungated in `best_test` (the project's
+reported metric), oriented so that positive means the gate helps, with the validation-selected test
+reported alongside; the gate is judged to contribute on a dataset only if the mean paired difference
+exceeds its own SEM. All three datasets run to completion whatever the first one shows.
+
+- [ ] `ZINC` (5 seeds) · [ ] `MNISTSuperpixels` (5 seeds) · [ ] `ogbg-molhiv` (10 seeds)
+
 **Node-level gate ablation — done, and it decided the programme.** The protocol was
 pre-committed before running and is kept here because the result rests on it: two arms identical
 except `rank_mode` (`none` forces `nrank=None` so `LDNAConv.message` skips the gate and every conv
