@@ -1166,9 +1166,13 @@ pair is one satisfiable and one unsatisfiable 1-WL-equivalent graph, so identica
 of two); BREC 0 of 400 at every seed (all 400 pairs are 1-WL-indistinguishable), reliability
 failures 0. Matching it makes the gate the measured mechanism behind EXP 1.0000 and BREC 321; any
 non-zero BREC count or EXP fold off 0.5000 means the order reaches the model by some other path,
-and is reported as that.
+and is reported as that. CEXP added the same day, before any result: `configs/ldna_cexp_ungated.yaml`
+against `ldna_cexp.yaml`, one 10-fold sweep at seed 42 as the gated arm; predicted at the 1-WL
+ceiling ≈ 0.75 like GIN's 0.7492 (the EXP-derived half pinned at 50%, the corrupted half
+1-WL-learnable), against the gated 1.0000.
 
 - [ ] `EXP` ungated, seeds 42/43/44
+- [ ] `CEXP` ungated, seed 42
 - [ ] `BREC` ungated, 10 protocol seeds
 
 **Node-level gate ablation — done, and it decided the programme.** The protocol was
