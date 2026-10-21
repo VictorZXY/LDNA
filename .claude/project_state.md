@@ -96,8 +96,8 @@
   split-mask columns become 10 per-split shallow `Data` copies sharing x/edge_index/y/nrank,
   riding the train_loader as `cv_folds` the way the EXP/CEXP folds do). `rank_mode: none` is the
   ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
-  sum-of-messages aggregator), used by the gate-ablation config pairs at node level and graph
-  level.
+  sum-of-messages aggregator), used by the gate-ablation configs at node level, at graph level
+  and on the expressiveness benchmarks.
   `ogbn-arxiv` is wired full-graph: OGB ships split INDEX tensors, so `utils/resolver.py:
   _idx_to_masks` turns them into the boolean `[N]` masks the rest of the node path reads and
   rejects a non-partitioning split on the spot; `T.ToUndirected()` symmetrizes the directed
@@ -135,8 +135,8 @@
   degree, overfitting speed, and heterophily-specific machinery. Full numbers and disclosures in `.claude/experiments.md` § Results log.
   This is a contrast with graph level, where the same aggregator improved four of the five
   datasets (and regressed on molpcba) and reaches BREC 321 — though that comparison was
-  two-factor; isolated single-factor, the gate helps on ZINC and is null on MNIST and molhiv
-  (below). The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
+  two-factor; isolated single-factor, the gate helps on ZINC and is null on MNIST and molhiv,
+  and without it BREC falls to 0 (below). The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
   already gives the node-level ranking picture and the ablation explains it.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
@@ -164,9 +164,16 @@
   gain did not come from the gate; by elimination (unpaired, across experiments) it is
   attributable to removing `lin_aggr`. Whether δ carries graph size (R² 0.545 ZINC, 0.001 MNIST)
   fits two of the three outcomes, not molhiv (0.483). The rankings are unaffected — they compare LDNA against baselines
-  whatever is inside LDNA — but the gate can be named as the mechanism only per dataset. BREC
-  0 → 321 still has no single-factor gate ablation. Details in `.claude/experiments.md`
-  § Results log.
+  whatever is inside LDNA — but the gate can be named as the mechanism only per dataset. Details
+  in `.claude/experiments.md` § Results log.
+- **Single-factor expressiveness gate ablation (2026-10-21).** `ldna_{exp,cexp,brec}_ungated.yaml`,
+  each its gated twin with only `rank_mode: none`, same nauty labelling and protocol, prediction
+  fixed in advance. Without the gate LDNA falls to the 1-WL ceiling, as predicted and on GIN's
+  numbers: EXP 1.0000 → 0.5000 (all 30 folds over seeds 42/43/44), CEXP 1.0000 → 0.7500, BREC
+  321 → 0 of 400 at every seed. The labelling is the source of the beyond-1-WL signal and the gate
+  is the only part of LDNA that reads it. EXP test is 0.5000 at every epoch; three single-epoch
+  train/val values are off 0.5 by exactly one pair, in both directions, attributed to float32
+  rounding. Details in `.claude/experiments.md` § Results log.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -194,7 +201,8 @@
   1-WL ceiling (EXP 1.00 / CEXP 1.00 / BREC **321** official — the `gate_init_std: 0.1`
   gate-init variant, with zero-init 138 kept alongside) while GIN sits on it exactly
   (EXP 0.5000 exactly, CEXP 0.7492 ≈ the theoretical 0.75, BREC 0) and DGN saturates EXP/CEXP and scores BREC **145** official (273 under
-  shared canonicalization). BREC scores are **best across the 10 protocol seeds**, the benchmark's
+  shared canonicalization). LDNA with its gate removed and the labelling kept falls to the same
+  ceiling (EXP 0.5000, CEXP 0.7500, BREC 0; single-factor ablation above). BREC scores are **best across the 10 protocol seeds**, the benchmark's
   own convention (revised 2026-07-29 from mean-only, which understated us against every published
   entry; means are kept alongside in `.claude/experiments.md`). These datasets are featureless, so
   the permutation-invariance device is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via

@@ -780,8 +780,9 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
   per dataset. `search/` — hyperparameter searches; a permanent record, since the tuned config it
   produces is committed and cited by every ranking row. `ablation/<mechanism>/` — reported
   method-internal comparisons, where the arms are the same model with one component varied
-  (currently `ablation/gate/`, the gate ablation at both levels — four node-level jobs and 40
-  per-seed graph-level jobs, kept together as one experiment rather than split by dataset — and
+  (currently `ablation/gate/`, the gate ablation at all three levels — four node-level jobs, 40
+  per-seed graph-level jobs and five expressiveness jobs (EXP ×3, CEXP, BREC, with the
+  `exp_ungated_pair_float` check), kept together as one experiment rather than split by dataset — and
   `ablation/pepstruct_readout/`). `explore/<topic>/` — probes,
   candidate comparisons and abandoned variants, i.e. work that may be discarded outright.
   Nothing is filed flat at the root once its run has finished.
@@ -1152,7 +1153,7 @@ favour neither arm. Logs and pickles under `out/logs/ablation/gate/`; numbers in
       +0.01614 ± 0.01191 (7/10), just past its SEM (1.4 SEM). The gated arm's spread is the smaller one
       under both conventions.
 
-**Expressiveness gate ablation — running (protocol pre-committed 2026-10-21).** Isolates the gate
+**Expressiveness gate ablation — done (protocol pre-committed 2026-10-21).** Isolates the gate
 behind the beyond-1-WL results, where the existing comparisons are LDNA vs GIN (different
 architectures) and zero-init vs gate-init (both gated). Arms: `configs/ldna_exp_ungated.yaml` against
 `ldna_exp.yaml`, and `configs/ldna_brec_ungated.yaml` against `ldna_brec_gateinit.yaml` (the reported
@@ -1169,11 +1170,17 @@ non-zero BREC count or EXP fold off 0.5000 means the order reaches the model by 
 and is reported as that. CEXP added the same day, before any result: `configs/ldna_cexp_ungated.yaml`
 against `ldna_cexp.yaml`, one 10-fold sweep at seed 42 as the gated arm; predicted at the 1-WL
 ceiling ≈ 0.75 like GIN's 0.7492 (the EXP-derived half pinned at 50%, the corrupted half
-1-WL-learnable), against the gated 1.0000.
+1-WL-learnable), against the gated 1.0000. All ran on ee-kraken; logs under
+`out/logs/ablation/gate/`; numbers in § Results log.
 
-- [ ] `EXP` ungated, seeds 42/43/44
-- [ ] `CEXP` ungated, seed 42
-- [ ] `BREC` ungated, 10 protocol seeds
+- [x] `EXP` ungated (seeds 42/43/44): **as predicted** — test 0.5000 at every epoch of all 30 folds
+      (0.5000 ± 0.0000 at each seed); gated 1.0000 (per-fold best-of-N). Three single-epoch values
+      elsewhere are off 0.5 by exactly one pair, in both directions, attributed to float32 rounding
+      rather than the model separating a pair (§ Results log).
+- [x] `CEXP` ungated (seed 42): **as predicted** — 0.7500 in every fold, for train, val and test
+      (GIN 0.7492 ± 0.0026; gated 1.0000).
+- [x] `BREC` ungated (10 seeds): **as predicted** — 0 of 400 at every seed and in every family,
+      reliability failures 0 (gated 321 best / 312.0 ± 4.0 mean).
 
 **Node-level gate ablation — done, and it decided the programme.** The protocol was
 pre-committed before running and is kept here because the result rests on it: two arms identical
@@ -1221,11 +1228,14 @@ than spend the ranking compute.
 > across experiments), is attributable to removing `lin_aggr`. So "the gate works at graph level and not
 > at node level" holds for ZINC only and must be stated per dataset.
 >
-> **Still without a single-factor gate ablation: BREC 0 → 321**, the place the gate is most
-> strongly implicated. The available comparisons are LDNA-vs-GIN (different architectures) and
-> zero-init-vs-gate-init (138 → 321), which varies the gate's *initialisation*, not its presence.
-> It also uses `rank_mode: position` on a **nauty canonical labelling**, a structure-derived
-> individualizing rank, not the feature rank measured above.
+> **The beyond-1-WL results, single-factor since 2026-10-21.** With the nauty labelling and every
+> other knob unchanged, removing the gate (`rank_mode: none`) drops LDNA to the 1-WL ceiling: EXP
+> 0.5000 in all 30 folds, CEXP 0.7500, BREC 0 of 400 at every seed (§ Results log 2026-10-21). The
+> labelling is the source of the beyond-1-WL signal and the gate is the only part of LDNA that reads
+> it. The earlier comparisons — LDNA-vs-GIN (different architectures) and zero-init-vs-gate-init
+> (138 → 321, which varies the gate's *initialisation*, not its presence) — are no longer the only
+> evidence. These benchmarks use `rank_mode: position` on a **nauty canonical labelling**, a
+> structure-derived individualizing rank, not the feature rank measured above.
 
 ---
 
@@ -1267,6 +1277,7 @@ vs. baselines and the margin to #2. Keep § Objective status in sync.
 | 2026-08-12 | Peptides-struct | LDNA / GINE / DGN — readout probe, **NEGATIVE** | `readout: add` + `dropout: 0` against the ranking's `attention` + tuned dropout, following the LRGB reference; everything else frozen; runs=3, 150ep | test MAE: LDNA 0.2553 → **0.2534±0.0048**, GINE 0.2520 → **0.2489±0.0005**, DGN 0.2506 → **0.2488±0.0008** | LDNA's deficit to the best of the three: 0.0047 → **0.0046** — unchanged | Motivated by a measured mechanism rather than a guess: LDNA *underfits* here (train MAE 0.2459, second worst of the twelve, and the smallest train–test gap in the field at 0.0094), and 10 of the 11 targets correlate with graph size at \|r\| 0.67–0.89 while `AttentionalAggregation`'s softmax normalisation is size-invariant by construction — a sum readout restores the size channel the targets need. All three models improved, so the mechanism is real. **LDNA's position did not move**, so the readout is not what puts LDNA 9th. Per the closed decision gate the probe was not escalated to the full twelve configs and no reported number was changed; the ranking row above stands. Logs under `out/logs/ablation/pepstruct_readout/`. |
 | 2026-10-20 | all 9 graph-level + Questions + node-level gate ablation | validation-selected test, companion column | per run, test at the best-validation epoch, computed offline from the saved curves by `scripts/val_selected.py` (no retraining); 123 cells, whose recomputed `best_test` reproduces every reported value (7 differ by 0.0001, all 4-decimal rounding); independently re-verified | per-cell tables in `out/logs/ranking/val_selected_summary.md` | LDNA's rank unchanged on 8 of 9 graph-level datasets and on Questions; **molhiv #1 → #5** | **molhiv**: LDNA 0.7681 ± 0.0175 val-selected; the top five span 0.7681–0.7713 (#1 DeeperGCN-softmax), LDNA's 0.0032 deficit is against a 0.0117 sum of SEMs, so still a tie — as #1 was a tie with GAT under `best_test`. Val and test peak at the same epoch in only 7 of 120 molhiv runs. **code2**: LDNA's lead over PNA shrinks to 0.0001 (0.1835 vs 0.1834, both exact) — a nominal tie. **CIFAR10**: LDNA's #3, shared with EGC under `best_test` (0.0029 < 0.0038), becomes resolvable (0.0054 > 0.0046). **molpcba**: PNA–LDNA stays a tie. **ZINC**: the two conventions coincide on 10 of 12 cells (median per-run val–test correlation 0.9995). **Questions**, paired by split: GNN-VPA − LDNA is +0.0013 ± 0.0040 (6/10), so LDNA is tied for #2 where it was significantly behind under `best_test`; GIN − LDNA stays significant (+0.0157 ± 0.0045). **Node-level gate ablation**: ogbn-arxiv gated − ungated is −0.00163 ± 0.00085 under val-selection — significant by the paired-SEM rule, i.e. the gate lowers test accuracy, matching the significantly worse validation already recorded; Questions stays null (+0.00109 ± 0.00454). Grid-approximate cells (no pickle, 10-epoch grid) are molpcba PNA/GNN-VPA/DeeperGCN-powermean/DGN, CIFAR10 DGN and eight code2 configs; no LDNA rank depends on one, but the grid error is not small in general (ZINC LDNA reads 0.0913 on the grid against 0.0856 exact). |
 | 2026-10-21 | ZINC + MNISTSuperpixels + ogbg-molhiv | LDNA gate ablation, graph level (`rank_mode: none`) | `ldna_{zinc,mnist,hiv}_{gated,ungated}.yaml` at each dataset's committed shared config, identical except `rank_mode`; one run per seed, paired by seed (ZINC/MNIST 42–46, molhiv 42–51), 150ep; protocol pre-committed (§ Experiment queue) | `best_test`: ZINC MAE gated 0.0813±0.0090 vs ungated 0.0999±0.0104; MNIST acc 0.9389±0.0019 vs 0.9398±0.0009; molhiv ROC-AUC 0.7909±0.0090 vs 0.7858±0.0145 | n/a (LDNA-internal) | **The feature-rank gate contributes on ZINC and on neither other dataset.** Paired gated − ungated, + = gate helps: ZINC **+0.01862 ± 0.00525 SEM, 5/5 seeds** (3.5 SEM, paired t-test p = 0.024; 19% of the ungated MAE); MNIST −0.00086 ± 0.00114 (2/5, p = 0.49), null; molhiv +0.00509 ± 0.00555 (6/10, p = 0.38), null on the deciding metric — its val-selected companion is +0.01614 ± 0.01191 (7/10, 1.4 SEM, p = 0.21), which clears the 1-SEM rule, so molhiv is null as decided but not cleanly; the gated arm's spread is the smaller under both conventions. ZINC's val-selected agrees (+0.01866 ± 0.00528); MNIST has no separate val. **How this splits the two-factor comparison** is suggestive only — unpaired, with different seeds and run counts, and between-experiment drift of the same order as the effects (at identical configs the gated arms read ZINC 0.0813 against the ranking's rank-gated 0.0856, MNIST 0.9389 against 0.9410): ZINC's ungated arm 0.0999 is worse than the pre-gate LDNA's 0.0903 (1.4× the sum of SEMs), suggesting that dropping `lin_aggr` cost ZINC and the gate more than recovered it; MNIST's ungated arm 0.9398 already sits at most of the pre-gate → rank-gated gain (0.9357 → 0.9410), so that gain did not come from the gate and by elimination is attributable to removing `lin_aggr`. Against the 2026-08-03 measurements the pattern fits the size channel on two of three (R²(δ ~ 1/size) 0.545 ZINC, 0.001 MNIST, where every graph has 75 nodes; molhiv's 0.483 is null on the deciding metric), and δ's conditional entropy given the endpoints (2.14 / 1.69 / 4.49 bits ZINC / MNIST / molhiv) does not predict it. The configs were tuned before the gate existed. Arm means reproduce under `scripts/val_selected.py --pool`. Logs `out/logs/ablation/gate/`. |
+| 2026-10-21 | EXP + CEXP + BREC | LDNA gate ablation, expressiveness (`rank_mode: none`) | `ldna_{exp,cexp,brec}_ungated.yaml`, each its gated twin (`ldna_exp.yaml`, `ldna_cexp.yaml`, `ldna_brec_gateinit.yaml`) with only `rank_mode` changed — same nauty labelling, data and protocol (EXP 10-fold at seeds 42/43/44 — the gated arm's three sweeps, without its extra fold-10 seed, since no ungated fold could improve on 0.5 — CEXP 10-fold at seed 42, BREC 10 protocol seeds in one process); parameter counts identical (125,491 EXP/CEXP, 123,793 BREC); prediction pre-committed (§ Experiment queue) | ungated: EXP test **0.5000 ± 0.0000** at each seed (30/30 folds at 0.5000); CEXP **0.7500 ± 0.0000** (train, val and test 0.7500 in every fold); BREC **0 of 400** at every seed and in every family, reliability failures 0 | n/a (LDNA-internal) | **Without the gate LDNA falls to the 1-WL ceiling, as predicted.** Gated → ungated: EXP 1.0000 (per-fold best-of-N, val-selected) → 0.5000 (any selection rule gives 0.5000, since ungated test is 0.5000 at every epoch), CEXP 1.0000 → 0.7500, BREC 321 best / 312.0 ± 4.0 mean → 0. The ungated arm lands on GIN's numbers (EXP 0.5000, CEXP 0.7492, BREC 0): with the gate off nothing reads the canonical order, so the model is a sum-aggregation MPNN and ≤ 1-WL, and the labelling alone moves nothing. CEXP's exact 0.7500 is the ceiling itself — the corrupted, 1-WL-learnable half learned, the EXP half pinned at 50%. Over the 15,000 logged EXP epochs, test is 0.5000 at every one and three single-epoch values are off 0.5, each by exactly one pair and in both directions: seed 42 fold 3 epoch 432 val 55/108 (0.5093, the only one visible in the best-over-epochs logs), seed 44 fold 1 epoch 156 val 53/108, seed 42 fold 9 epoch 356 train 485/972. Every block holds whole pairs, so at those epochs one pair's two predictions differed. Attributed to float32 rounding rather than the model separating a pair: no code path reads the order with the gate off, the flips go both ways and never persist, and `exp_ungated_pair_float.{py,txt}` measures the two graphs' outputs differing by at most 3.0e-6 in float32 against 5.8e-15 in float64 over all 600 pairs, shrinking with machine precision. That check runs on the seed-42 final weights and three resets (which keep the trained node encoder), not the weights at the flipping epochs, which were not saved; at the three seeds' final weights the smallest class margin (4.4e-5 or more) is above the pair differences and no pair splits, so the flips need a margin near zero at the epoch itself, which this does not show directly. GPU scatter order is also nondeterministic, so a flip need not reproduce. Logs `out/logs/ablation/gate/`. |
 
 ### Parameter-count analysis (recorded 2026-07-13; refreshed 2026-07-29 to the rank-gated LDNA baseline, DGN added)
 
