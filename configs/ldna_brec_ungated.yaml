@@ -1,0 +1,31 @@
+experiment_name: ldna_brec_ungated
+
+# Expressiveness gate ablation on BREC, UNGATED arm. Identical to ldna_brec_gateinit.yaml (the
+# reported 321) except `rank_mode: none`, which keeps the gate module built but never engaged, so
+# every LDNAConv is a plain sum-of-messages aggregator and the nauty canonical order reaches
+# nothing in the model. `gate_init_std` is kept only so the RNG stream, and hence every other
+# module's per-pair initial weights, matches the gated run; the gate it initializes is never used.
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+  rank_mode: none
+  gate_init_std: 0.1
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 1
+seed: 42
+s_epsilon: true
+log_dir: out/logs/

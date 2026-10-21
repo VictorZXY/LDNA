@@ -1152,6 +1152,25 @@ favour neither arm. Logs and pickles under `out/logs/ablation/gate/`; numbers in
       +0.01614 ± 0.01191 (7/10), just past its SEM (1.4 SEM). The gated arm's spread is the smaller one
       under both conventions.
 
+**Expressiveness gate ablation — running (protocol pre-committed 2026-10-21).** Isolates the gate
+behind the beyond-1-WL results, where the existing comparisons are LDNA vs GIN (different
+architectures) and zero-init vs gate-init (both gated). Arms: `configs/ldna_exp_ungated.yaml` against
+`ldna_exp.yaml`, and `configs/ldna_brec_ungated.yaml` against `ldna_brec_gateinit.yaml` (the reported
+321), each identical to its gated twin except `rank_mode: none`. The nauty canonical labelling, the
+data and every other knob are unchanged; with the gate off nothing in the model reads the order, so
+ungated LDNA is a sum-aggregation message-passing network and provably ≤ 1-WL. Protocol as the gated
+arm: EXP three full 10-fold sweeps at seeds 42/43/44; BREC one process over the 10 protocol seeds
+(the model is built once and the encoder carries across pairs and seeds, so seeds are not split).
+**Prediction, fixed in advance:** EXP test accuracy exactly 0.5000 in every fold at every seed (each
+pair is one satisfiable and one unsatisfiable 1-WL-equivalent graph, so identical outputs score one
+of two); BREC 0 of 400 at every seed (all 400 pairs are 1-WL-indistinguishable), reliability
+failures 0. Matching it makes the gate the measured mechanism behind EXP 1.0000 and BREC 321; any
+non-zero BREC count or EXP fold off 0.5000 means the order reaches the model by some other path,
+and is reported as that.
+
+- [ ] `EXP` ungated, seeds 42/43/44
+- [ ] `BREC` ungated, 10 protocol seeds
+
 **Node-level gate ablation — done, and it decided the programme.** The protocol was
 pre-committed before running and is kept here because the result rests on it: two arms identical
 except `rank_mode` (`none` forces `nrank=None` so `LDNAConv.message` skips the gate and every conv
