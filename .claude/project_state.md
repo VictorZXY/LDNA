@@ -96,7 +96,8 @@
   split-mask columns become 10 per-split shallow `Data` copies sharing x/edge_index/y/nrank,
   riding the train_loader as `cv_folds` the way the EXP/CEXP folds do). `rank_mode: none` is the
   ungated LDNA ablation (the gate module exists but never engages — every conv is a plain
-  sum-of-messages aggregator), used by the gate-ablation config pairs on both datasets.
+  sum-of-messages aggregator), used by the gate-ablation config pairs at node level and graph
+  level.
   `ogbn-arxiv` is wired full-graph: OGB ships split INDEX tensors, so `utils/resolver.py:
   _idx_to_masks` turns them into the boolean `[N]` masks the rest of the node path reads and
   rejects a non-partitioning split on the spot; `T.ToUndirected()` symmetrizes the directed
@@ -133,8 +134,9 @@
   (Spearman +0.888). Three hypotheses were tested and refuted — self-dilution growing with
   degree, overfitting speed, and heterophily-specific machinery. Full numbers and disclosures in `.claude/experiments.md` § Results log.
   This is a contrast with graph level, where the same aggregator improved four of the five
-  datasets (and regressed on molpcba) and reaches BREC 321 — though see the EVIDENCE GAP note in
-  `.claude/experiments.md`: that graph-level comparison is two-factor and never isolated the gate. The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
+  datasets (and regressed on molpcba) and reaches BREC 321 — though that comparison was
+  two-factor; isolated single-factor, the gate helps on ZINC and is null on MNIST and molhiv
+  (below). The arxiv 11-model ranking (~50 GPU-h) is **not** run: Questions
   already gives the node-level ranking picture and the ablation explains it.
 - `train.py: _reset_encoders` re-initializes the node/edge encoders at the start of each run —
   model `reset_parameters()` covers the conv stack, norms, readout and head but not the encoders —
@@ -152,6 +154,19 @@
   except on molhiv (#1 → #5, inside a five-way statistical tie); on Questions it becomes tied for
   #2, and on ogbn-arxiv the gate's paired effect turns significantly negative. Details in
   `.claude/experiments.md` § Results log.
+- **Single-factor graph-level gate ablation (2026-10-21).** Commit `2278661` added the rank gate
+  and removed `lin_aggr` in one change, so the earlier graph-level comparison was two-factor.
+  Config pairs `ldna_{zinc,mnist,hiv}_{gated,ungated}.yaml`, identical except `rank_mode`,
+  paired by seed, deciding metric `best_test` fixed in advance: the gate **helps on ZINC** (MAE
+  0.0186 lower with the gate, ± 0.0052 SEM, 5/5 seeds, paired t-test p = 0.024) and is **null on
+  MNIST** (accuracy −0.0009 ± 0.0011) and **on molhiv** (ROC-AUC +0.0051 ± 0.0055; the
+  val-selected column leans positive, +0.0161 ± 0.0119, p = 0.21). MNIST's earlier two-factor
+  gain did not come from the gate; by elimination (unpaired, across experiments) it is
+  attributable to removing `lin_aggr`. Whether δ carries graph size (R² 0.545 ZINC, 0.001 MNIST)
+  fits two of the three outcomes, not molhiv (0.483). The rankings are unaffected — they compare LDNA against baselines
+  whatever is inside LDNA — but the gate can be named as the mechanism only per dataset. BREC
+  0 → 321 still has no single-factor gate ablation. Details in `.claude/experiments.md`
+  § Results log.
 - Two torch≥2.6 / PyG 2.7 compatibility shims (needed to load MNIST/ZINC/OGB):
   `data_utils/transforms.py` `__call__`→`forward`; `data_utils/__init__.py` `torch.load`
   `weights_only=False`.
@@ -252,14 +267,6 @@
 ---
 
 ## Open questions
-- **Single-factor graph-level gate ablation — running.** Commit `2278661` added the rank gate and
-  removed `lin_aggr` in the same change, so the graph-level result compares {gate, no lin_aggr}
-  against {no gate, lin_aggr} and never isolated the gate. The single-factor run is now under way:
-  config pairs `ldna_{zinc,mnist,hiv}_{gated,ungated}.yaml`, identical except `rank_mode`, one
-  process per seed (ZINC/MNIST 42–46, molhiv 42–51), paired by seed, deciding metric fixed in
-  advance (`.claude/experiments.md` § Experiment queue). It is **not** required for the performance
-  claim — the rankings compare LDNA against baselines under identical configs whatever is inside
-  LDNA — but it is required before describing the gate as the mechanism behind those rankings.
 - Test LDNA performance as a standalone aggregator component on other methods.
 
 ---
