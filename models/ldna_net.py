@@ -59,9 +59,9 @@ class LDNA(nn.Module):
         # data-side lexicographic sort (sort_graphs) and ranks by feature-row ties; 'position'
         # assumes the data already carries a canonical node order (e.g. ogbg-code2's AST DFS order,
         # which is not feature-sorted) and ranks by normalized intra-graph position. 'none' is the
-        # ungated ablation for the node-level gate diagnostic (D2): no rank ever reaches the convs,
-        # so the gate module still exists but never engages and every layer is a plain
-        # sum-of-messages aggregator.
+        # ungated arm of the gate ablation (node level, graph level and the expressiveness
+        # benchmarks): no rank ever reaches the convs, so the gate module still exists but never
+        # engages and every layer is a plain sum-of-messages aggregator.
         if rank_mode not in ('feature', 'position', 'none'):
             raise ValueError(f"Argument `rank_mode` must be 'feature', 'position' or 'none', "
                              f"got '{rank_mode}'")
@@ -165,8 +165,8 @@ class LDNA(nn.Module):
         # mirrors DGN's precomputed `eig_vec` kwarg and keeps the shared forward signature additive:
         # graph-level callers pass nothing and fall through to the per-batch derivation unchanged.
         # 'none' forces the rank off even when the batch carries a precomputed one, so
-        # LDNAConv.message's `nrank_i is not None` branch never engages the gate (the gate ablation,
-        # diagnostic D2 — see __init__).
+        # LDNAConv.message's `nrank_i is not None` branch never engages the gate (the gate ablation —
+        # see __init__).
         if self.rank_mode == 'none':
             nrank = None
         elif nrank is None:
