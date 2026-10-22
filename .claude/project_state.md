@@ -259,6 +259,12 @@
   spanning heterophilous binary and homophilous 40-class already establish that, and the
   remaining datasets would cost 50–200 GPU-h each to reconfirm it. Node level is reported as a
   measured boundary condition rather than as a benchmark sweep.
+- **Graph transformers are not run; they are compared through published numbers.** A
+  primary-source review (2026-07-29) found citable numbers wherever one could run here. MNIST has
+  no graph-transformer number at all, but it has its own val ≡ test problem. Running one under
+  the shared LDNA-tuned config would score below its published value and read as crippling the
+  baseline. The reference implementations are also unmaintained, and the viable port (PyG's
+  `GPSConv`) costs about as much as the DGN port did.
 
 ---
 
@@ -270,7 +276,6 @@
   suite from five to nine; the three axes it was built to close — long-range dependency,
   multi-target regression, featureless graphs — are now covered, so a further dataset needs a
   new reason, not just a new name.
-- Add graph transformer implementations and run them on the benchmark datasets.
 
 ---
 

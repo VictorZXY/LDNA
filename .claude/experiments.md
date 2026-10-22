@@ -292,29 +292,39 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 |---|---|---|
 | `GCN`, `GIN`, `GINE`, `GraphSAGE`, `GAT`, `GATv2`, `PNA`, `EGC`, `DeeperGCN` | done | existing wrappers in `models/` (`GraphSAGE` = `models/sage.py`, resolver query `GraphSAGE`/`SAGE`) |
 | `GNN-VPA` | done | `models/vpa.py` (`VPA`): GIN/GINE backbone with PyG built-in `VariancePreservingAggregation` (`sum/√N`) via `aggr=`; dual-path (edge datasets→GINEConv, edge-less→GINConv); shared interface. Resolver query `GNN-VPA` |
-| `DGN` | done | `models/dgn.py` (`DGN`, `DGNConv`): PNA-shaped layer whose aggregator set adds the directional `dirK-av` / `dirK-dx`, weighted by the gradient of a per-node scalar field. No PyG built-in exists (`DirGNNConv` is an unrelated paper), so `DGNConv` is a custom `MessagePassing(aggr=None)` port of the official DGL implementation. Resolver query `DGN`. The field is the low-frequency Laplacian eigenvectors on the four molecular/image datasets and the AST depth on `ogbg-code2` — see the two notes below |
+| `DGN` | done | `models/dgn.py` (`DGN`, `DGNConv`): PNA-shaped layer whose aggregator set adds the directional `dirK-av` / `dirK-dx`, weighted by the gradient of a per-node scalar field. No PyG built-in exists (`DirGNNConv` is an unrelated paper), so `DGNConv` is a custom `MessagePassing(aggr=None)` port of the official DGL implementation. Resolver query `DGN`. The field is the low-frequency Laplacian eigenvectors on molhiv, molpcba, ZINC, MNISTSuperpixels, both Peptides, ogbg-ppa and the expressiveness benchmarks; the superpixel coordinates on `CIFAR10`, whose `edge_index` is directed; and the AST depth on `ogbg-code2`. See the notes below and § Datasets |
 
-> **DGN's configs use the paper's ZINC aggregator set, not its MolHIV/PCBA one.** The four molecular/image
-> `dgn_*.yaml` set `aggregators: [mean, dir1-dx, dir1-av]` — the set the official repo ships for
-> ZINC, and the best row on ZINC-simple / MolHIV-simple in the paper's fixed-budget ablation.
-> The reason is comparison hygiene: DGN is PNA plus directionality, and the alternative set
-> (`[mean, max, min, dir1-dx, dir1-av]`, which the code keeps as its default) overlaps this
-> repo's `PNA` baseline (`[mean, min, max, std]`) in three of five aggregators, so the two
-> baselines would largely re-measure each other. With `[mean, dir1-dx, dir1-av]` the overlap is
-> `mean` alone — unavoidable, since the directional weights are a partition of unity (`av`) or
-> sum to ~0 (`dx`), so a purely directional layer would drop the isotropic signal, a
-> configuration the paper never runs. The degree `scalers` stay at all three: they are a
-> per-node gain applied uniformly to whatever aggregators exist, orthogonal to which aggregators
-> those are, and keeping them reproduces the official ZINC config exactly. Side effect: the
-> narrower `post_nn` input (`(3*3+1)*hidden` instead of `(5*3+1)*hidden`) puts DGN at ~0.73x
-> `PNA`'s parameter count and ~3.0x LDNA's, rather than ~1.05x PNA's.
+> **DGN's aggregator sets are the paper's own per-dataset set, minus the members `PNA` also uses.**
+> The reason is comparison hygiene. DGN is PNA plus directionality, so a set that shares most of
+> this repo's `PNA` aggregators (`[mean, min, max, std]`) would largely re-measure that baseline.
+> Each dataset's set is taken from the paper (Figure 6), and PNA's members are dropped except
+> `mean`. Keeping `mean` is unavoidable: the directional weights are a partition of unity (`av`)
+> or sum to ~0 (`dx`), so a purely directional layer would drop the isotropic signal, and the
+> paper never runs one. Applied:
+> - `ZINC` → `[mean, dir1-dx]` (paper `{mean, dx1, max, min}`).
+> - `CIFAR10` → `[mean, dir1-dx, dir2-dx]` (paper `{mean, dx1, dx2, max}`; two directions
+>   because an image has two coordinates).
+> - `ogbg-molhiv` → `[mean, dir1-dx, dir1-av]` (paper `{mean, dx1, av1, max, min}`).
+> - `ogbg-molpcba` keeps `[mean, dir1-dx, dir1-av]`, knowingly uncorrected, because correcting
+>   it means re-running a 350k-graph ranking (§ Results log 2026-08-12).
+> - Datasets with no Figure 6 set (MNISTSuperpixels, both Peptides, ogbg-ppa, EXP/CEXP/BREC)
+>   carry `[mean, dir1-dx, dir1-av]`. That is the set the official repo ships for ZINC, and the
+>   best row on ZINC-simple / MolHIV-simple in the paper's fixed-budget ablation.
+> - `ogbg-code2` uses `[mean, dir1-dx]` (note below).
+>
+> The code's default stays the paper's MolHIV set, `[mean, max, min, dir1-dx, dir1-av]`. The
+> degree `scalers` stay at all three: they are a per-node gain applied uniformly to whatever
+> aggregators exist, orthogonal to which aggregators those are. Side effect: the narrower
+> `post_nn` input puts DGN at roughly 0.7× `PNA`'s parameter count and 3× LDNA's (§ Parameter-count
+> analysis), rather than ~1.05× PNA's.
 
 > **DGN needs a precomputed eigenvector field.** `data_utils/preprocess.py: add_eig_vecs` attaches a
 > per-node `eig_vec` to the data, and `train.py` forwards it only when present — the resolver
 > attaches it only for `DGN`, so its presence is the routing switch and the other baselines'
 > call path is untouched. Two ordering constraints are load-bearing: the field is computed
-> **after** `sort_graphs` (the canonical sort permutes nodes without realigning extra per-node
-> attributes, so an earlier attachment desynchronises silently) and, for the OGB datasets,
+> **after** the canonical order (`sort_graphs`, or `canonicalize_graphs` on ogbg-ppa and EXP/CEXP;
+> either permutes nodes without realigning extra per-node attributes, so an earlier attachment
+> desynchronises silently) and, for the OGB datasets,
 > **before** the split slices (an index view cannot be re-collated). Eigenvectors are taken per
 > connected component, as the paper prescribes: on a disconnected graph the whole-graph
 > Laplacian's lowest non-trivial eigenvectors degenerate into component indicators and the
@@ -328,8 +338,8 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > deliberately does not rewrite the dataset's own processed cache, which every other model
 > shares. The build loop is pinned to one thread: `eigh` on graph-sized matrices is
 > dominated by BLAS thread-launch overhead, and letting it fan out was ~30x slower in wall clock
-> while starving the machine's other jobs. This whole path applies to the four
-> molecular/image datasets only; `ogbg-code2` uses the depth field below instead.
+> while starving the machine's other jobs. Every DGN config uses this path except two: `ogbg-code2`
+> takes the depth field below, and `CIFAR10` the superpixel coordinates (`AddPosField`, § Datasets).
 
 > **DGN on `ogbg-code2` uses the AST depth, not eigenvectors.** The paper substitutes a
 > domain-provided field when eigenvectors are unusable (it used image coordinates for CIFAR10,
@@ -367,21 +377,31 @@ Every dataset is evaluated with LDNA plus all baselines. Status as above.
 > 12.05M parameters against PNA's 14.34M. That is *less* of a gap than the other datasets, where
 > dropping `min`/`max`/`std` puts DGN at 24–27% below PNA; code2 is 16% below.
 
-> **DGN's advantage is dataset-selective.** DGN places 1st only on ZINC (0.0507 test MAE)
-> and code2 (0.1871 test F1, n=3) — the datasets whose dominant structure matches its directional
-> field: the molecular backbone recovered by the low-frequency Laplacian eigenvector, and the
-> AST's exact root-to-leaf depth. Elsewhere the field is fragmented (molhiv, 7.5% disconnected
-> → 6th), collapses a 2-D layout onto one axis (MNIST → 3rd, tied LDNA), or is one axis shared
-> across 128 tasks (molpcba 3rd), and DGN reduces to a costlier PNA. The edge is bought with a
-> hand-supplied per-dataset directional prior. **Adding DGN drops LDNA out of top-2 on ZINC**:
-> ZINC now reads DGN 0.0507 / PNA 0.0807 / LDNA 0.0856 (LDNA 3rd). LDNA stays top-2 on the other
-> four (molhiv 1st, code2 2nd, mnist 2nd, molpcba 2nd).
+> **DGN's advantage is dataset-selective.** DGN is #1 on five of the nine graph-level datasets:
+> ZINC (0.0531 test MAE), ogbg-code2 (0.1871 test F1, n=3), CIFAR10, Peptides-func and
+> Peptides-struct. It is 3rd or lower on the other four: MNIST 3rd (tied with LDNA), molpcba
+> 3rd, molhiv tied 6th, ogbg-ppa 6th.
+>
+> On the original five, DGN is 1st where the dataset's dominant structure matches its
+> directional field: on ZINC, the molecular backbone recovered by the low-frequency Laplacian
+> eigenvector; on code2, the AST's exact root-to-leaf depth. Elsewhere the field is fragmented
+> (molhiv, 7.5% disconnected), collapses a 2-D layout onto one axis (MNIST), or is one axis
+> shared across 128 tasks (molpcba), and DGN reduces to a costlier PNA.
+>
+> In the expansion, DGN's CIFAR10 lead is an input-information artefact: DGN alone receives the
+> superpixel coordinates (§ Results log). On ogbg-ppa, which has no node features, PNA leads.
+>
+> The edge is bought with a hand-supplied per-dataset directional prior. **Adding DGN dropped
+> LDNA out of top-2 on ZINC**, which reads DGN 0.0531 / PNA 0.0807 / LDNA 0.0856 (LDNA 3rd). On
+> the other four of the original five, LDNA stayed top-2 (molhiv 1st, code2 2nd, MNIST 2nd,
+> molpcba 2nd).
 
 > **GIN xor GINE per dataset.** `GIN` and `GINE` are separate baselines, but only **one**
 > runs per dataset — edge datasets use `GINE`, edge-less use `GIN` (never fabricate
 > `edge_attr`). The rule is realized by the **config inventory**: each dataset ships only
 > `gine_<suffix>.yaml` (edge) *or* `gin_<suffix>.yaml` (edge-less), never both — currently
-> `gine_{hiv,molpcba,zinc}` and `gin_{mnist,questions}` (code2 → `gin`). `scripts/broadcast.py`
+> `gine_{hiv,molpcba,zinc,pepfunc,pepstruct,ppa}` and `gin_{mnist,cifar10,code2,questions}`, plus
+> `gin_{exp,cexp,brec}` on the edge-less expressiveness benchmarks. `scripts/broadcast.py`
 > globs `*_<suffix>.yaml`, so it and the ranking pick up whichever exists; its `HAS_EDGE` map
 > selects the matching GINE/GIN template for the `GNN-VPA` config the same way.
 
@@ -490,8 +510,8 @@ that still fail to reach top-2 — stop and report instead of looping.
 
 ## Search spaces
 
-LDNA search space in `hyperparam_search.py::objective` (all graph-level datasets —
-`ogbg-molhiv`, `ogbg-molpcba`, `ZINC`, `MNISTSuperpixels`, `ogbg-code2`):
+LDNA search space in `hyperparam_search.py::objective` (all nine graph-level datasets; `ogbg-ppa`
+overrides the width choices, below):
 
 | Hyperparameter | Range / choices | Notes |
 |---|---|---|
@@ -519,6 +539,9 @@ configs (final):
 | `ZINC` (subset, search) | 10k | 128 | ~78 |
 | `ZINC` (full, final) | 220k | 512 | ~430 |
 | `MNISTSuperpixels` | 60k | 256 | ~234 |
+| `CIFAR10` | 45k | 256 | ~176 |
+| `Peptides-func` / `Peptides-struct` | 10.9k | 64 | ~170 |
+| `ogbg-code2` | 408k | 128 | ~3,190 |
 | `ogbg-ppa` | 78.2k | 128 | ~611 |
 
 **`ogbg-ppa` exceeds the steps/epoch band deliberately (2026-08-05).** 611 is above ~100–300, and
