@@ -236,12 +236,16 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     elif dataset_query == 'ogbg-ppa':
         # 37-way species classification over protein-association graphs. The molecular OGB branch
         # above is the shape, with one substitution: the nodes carry NO features, so the feature
-        # lexsort cannot impose a permutation-invariant order and the device is the nauty canonical
-        # labelling instead (canonicalize_graphs, as on EXP/CEXP), which LDNA reads via
-        # rank_mode='position'. That labelling costs 2.87 ms/graph — 7.6 minutes over these 158,100
-        # — so it is cached in processed_dir and only the first of a ranking's twelve processes pays
-        # it, saving ~90 minutes across the set. The cache is a convenience, not what makes ppa
-        # feasible; host RAM is the binding constraint here (see canonicalize_graphs).
+        # lexsort cannot impose a permutation-invariant order and the device is a nauty canonical
+        # labelling instead, which LDNA reads via rank_mode='position'. It is the EDGE-COLOURED
+        # labelling (canonicalize_graphs_edge_colored, as on ZINC), not the vertex-only one EXP/CEXP
+        # use, because the edges carry 7-dim association-score rows: on ~99.4% of these graphs the
+        # bare connectivity has interchangeable nodes (structural twins) whose edges carry different
+        # rows, so a vertex-only labelling makes the canonical edge_attr, and with it the rank
+        # gate's output, depend on the input numbering. That labelling costs ~21 ms/graph (median) —
+        # about an hour, once, over these 158,100 — so it is cached in processed_dir and only the
+        # first of a ranking's twelve processes pays it. The cache is a convenience, not what makes
+        # ppa feasible; host RAM is the binding constraint here (see canonicalize_graphs).
         #
         # The rank-mode guard runs BEFORE the dataset is constructed, because constructing it is a
         # ~65 s, ~29 GiB load that a config which cannot run should not pay for.
@@ -263,22 +267,24 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
         # done before anything calls `get`, whose per-graph cache would keep serving the old view.
         dataset._data.y = dataset._data.y.view(-1)
 
-        dataset = canonicalize_graphs(dataset, cache_name='all')
+        dataset = canonicalize_graphs_edge_colored(dataset, cache_name='all')
 
         # A constant node feature, since every model here starts from a node encoder and there is
         # nothing to encode — the convention data_utils/brec.py already uses on featureless graphs.
         # Applied lazily per access (a `transform`, not a `pre_transform`) for the reason the
         # ogbg-code2 branch below gives: a pre_transform would make OGB rewrite a 31.5 GB processed
         # store, and `dataset.get(i)` — which the canonicalization above reads — must keep seeing the
-        # raw graph, whose `x is None` is what leaves nauty's colour partition empty.
+        # raw graph, whose `x is None` is what puts every node in a single colour cell.
         dataset.transform = T.Constant()
 
         # As on the molecular branches, the directional field is attached AFTER the canonical order
         # (which permutes the nodes) and BEFORE the split slicing (an index view cannot be
         # re-collated). It reads edge_index only, so the lazy constant feature above is invisible to
-        # it — `add_eig_vecs` goes through `get`, which does not apply a transform.
+        # it — `add_eig_vecs` goes through `get`, which does not apply a transform. The cache name
+        # carries the order, as ZINC's does, so fields cached for different orders never overwrite
+        # each other.
         if model_query == 'DGN':
-            dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all')
+            dataset = add_eig_vecs(dataset, k=model_kwargs.get('num_eig_vec', 1), cache_name='all_edge')
 
         train_dataset = dataset[split_idx['train']]
         val_dataset = dataset[split_idx['valid']]

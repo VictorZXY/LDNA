@@ -209,14 +209,16 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None)
 
 def edge_colored_canon_label(graph: Data):
     # canonicalize_graph's labelling colours vertices by `x` only, so on a graph with edge attributes
-    # (ZINC's bond types) two copies that differ only in which bond sits where can get different
-    # canonical forms, and the canonical edge_attr is then not invariant. nauty colours vertices
-    # only, so the edge attributes enter through the standard subdivision: each undirected edge
-    # {u, v} becomes a new vertex adjacent to u and v, coloured by its attribute row. The ordered
-    # partition is the original-vertex cells (by feature row, lexicographic) followed by the
-    # edge-vertex cells (by attribute row, lexicographic); both orders are permutation-invariant, so
-    # the labelling of the attributed graph is isomorphism-invariant. Returns new2old over the
-    # original vertices, for canonicalize_graph to apply.
+    # (ZINC's bond types, ogbg-ppa's 7-dim association-score rows) two copies that differ only in
+    # which attribute row sits on which edge can get different canonical forms, and the canonical
+    # edge_attr is then not invariant. nauty colours vertices only, so the edge attributes enter
+    # through the standard subdivision: each undirected edge {u, v} becomes a new vertex adjacent to
+    # u and v, coloured by its attribute row. The ordered partition is the original-vertex cells (by
+    # feature row, lexicographic; one cell when `x` is None) followed by the edge-vertex cells (by
+    # attribute row, lexicographic); both orders are permutation-invariant, so the labelling of the
+    # attributed graph is isomorphism-invariant. Rows are compared exactly, so continuous rows
+    # colour the same way categorical ones do. Returns new2old over the original vertices, for
+    # canonicalize_graph to apply.
     import pynauty  # optional heavy dependency; only imported where a labelling is computed
 
     n = graph.num_nodes
@@ -270,11 +272,11 @@ def edge_colored_canon_label(graph: Data):
 
 
 def canonicalize_graphs_edge_colored(dataset: InMemoryDataset, sort_y=False, cache_name=None):
-    # canonicalize_graphs with the edge-coloured labelling above, for datasets with categorical edge
-    # attributes (ZINC). Same permutation cache contract — the digest is taken over the
-    # pre-canonicalization graph and the file named after the rule — with edge_attr hashed as well,
-    # since the labelling reads it, and its own rule tag and file name, so the two rules' caches
-    # never collide.
+    # canonicalize_graphs with the edge-coloured labelling above, for datasets whose edge attributes
+    # the models read (ZINC, ogbg-ppa). Same permutation cache contract — the digest is taken over
+    # the pre-canonicalization graph and the file named after the rule — with edge_attr hashed as
+    # well, since the labelling reads it, and its own rule tag and file name, so the two rules'
+    # caches never collide.
     all_graphs = [dataset.get(i) for i in range(len(dataset))]
     num_nodes = [graph.num_nodes for graph in all_graphs]
 
