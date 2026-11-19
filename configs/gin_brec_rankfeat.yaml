@@ -1,0 +1,34 @@
+experiment_name: gin_brec_rankfeat
+
+# Canonical-position control on BREC. Identical to gin_brec.yaml except `rank_feature: true`, which
+# adds each node's normalized nauty canonical position (the quantity LDNA reads under
+# `rank_mode: position`) to the encoded node features through a Linear(1, d) before the first conv.
+# BRECDataset canonicalizes by default (`canonical: true`), so this is the order LDNA reads. The
+# position map sits in the backbone and is re-initialized per pair with it; the shared Linear(1, d)
+# node encoder is not (see data_utils/brec.py).
+
+# Model specific arguments/hyperparameters
+model: GIN
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_trans_layers: 1
+  eps: 0.0
+  train_eps: true
+  dropout: 0.0
+  readout: attention
+  residual: true
+  rank_feature: true
+  batch_norm: true
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 0
+seed: 42
+s_epsilon: true
+log_dir: out/logs/

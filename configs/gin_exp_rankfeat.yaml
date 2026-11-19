@@ -1,0 +1,51 @@
+experiment_name: gin_exp_rankfeat
+
+# Canonical-position control on EXP. Identical to gin_exp.yaml except `rank_feature: true`, which
+# adds each node's normalized nauty canonical position (the quantity LDNA reads under
+# `rank_mode: position`) to the encoded node features through a Linear(1, d) before the first conv.
+# The resolver canonicalizes EXP for every model, so this is the order LDNA reads. Same protocol as
+# gin_exp.yaml: three full 10-fold sweeps, launched as
+# `--seed <s> --experiment_name gin_exp_rankfeat_seed<s>` for s in 42, 43, 44.
+
+# Model specific arguments/hyperparameters
+model: GIN
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_trans_layers: 1
+  num_pred_layers: 3
+  eps: 0.0
+  train_eps: True
+  dropout: 0.0
+  readout: attention
+  residual: true
+  rank_feature: true
+
+# Dataset specific arguments/hyperparameters
+dataset: EXP
+data_args:
+  root: data/exp/
+  batch_size: 20
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 0
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+    factor: 0.7
+    patience: 5
+    min_lr: 1.0e-3
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

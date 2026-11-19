@@ -10,13 +10,15 @@ from torch_geometric.nn.pool import global_add_pool, global_max_pool, global_mea
 from torch_geometric.nn.resolver import activation_resolver
 from torch_geometric.utils import to_dense_batch
 
+from models import LDNA
+
 
 class GIN(nn.Module):
     def __init__(self, *,
                  channel_list=None, in_channels=None, hidden_channels=None, out_channels=None, num_layers=None,
                  edge_dim=None, node_encoder=None, edge_encoder=None, num_trans_layers=1, eps=0.0, train_eps=False,
                  num_pred_heads=None, num_pred_layers=3, readout=None, dropout=0.0, batch_norm=True,
-                 residual=False, act='relu', act_first=False, act_kwargs=None, **kwargs):
+                 residual=False, rank_feature=False, act='relu', act_first=False, act_kwargs=None, **kwargs):
         super(GIN, self).__init__()
 
         if in_channels is not None:
@@ -32,6 +34,15 @@ class GIN(nn.Module):
         self.channel_list = channel_list
 
         self.node_encoder = node_encoder
+
+        # Optional canonical-position input feature: the normalized intra-graph position that LDNA's
+        # rank_mode='position' reads (LDNA._position_rank), mapped by a Linear(1, d) and added to the
+        # encoded node features before the first conv. Off by default, and then nothing is built.
+        # CONSTRAINT: use only where the node order is canonical by construction (the nauty
+        # labelling); on any other order the feature breaks permutation invariance.
+        self.rank_feature = rank_feature
+        if rank_feature:
+            self.rank_encoder = nn.Linear(1, channel_list[0])
 
         self.convs = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
@@ -100,10 +111,14 @@ class GIN(nn.Module):
             self.readout_attention.reset_parameters()
         if self.num_pred_heads:
             self.pred_nn.reset_parameters()
+        if self.rank_feature:
+            self.rank_encoder.reset_parameters()
 
     def forward(self, x, edge_index, edge_attr, batch):
         if self.node_encoder is not None:
             x = self.node_encoder(x)
+        if self.rank_feature:
+            x = x + self.rank_encoder(LDNA._position_rank(x, batch))
 
         for i, (conv, batch_norm, dropout) in enumerate(zip(self.convs, self.batch_norms, self.dropout)):
             x_res = x
