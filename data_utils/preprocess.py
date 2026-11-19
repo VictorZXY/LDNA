@@ -65,9 +65,10 @@ def canonicalize_graph(graph: Data, sort_y=False, new2old=None):
     # lexsort, individualizes ties so every node receives a distinct position. LDNA reads the order
     # via rank_mode='position'. Bookkeeping mirrors sort_graph, so the two are interchangeable.
     #
-    # A precomputed `new2old` skips the labelling itself, which is the expensive part (measured
-    # 2.87 ms/graph on ogbg-ppa, against ~0.4 ms for the permute and re-sort below it); that is what
-    # canonicalize_graphs' on-disk cache stores, and with one supplied pynauty is never imported.
+    # A precomputed `new2old` skips the labelling itself, which is the expensive part (measured on
+    # ogbg-ppa under this vertex-only rule: 2.87 ms/graph, against ~0.4 ms for the permute and
+    # re-sort below it); that is what canonicalize_graphs' on-disk cache stores, and with one
+    # supplied pynauty is never imported.
     if new2old is None:
         import pynauty  # optional heavy dependency; only imported where a labelling is computed
 
@@ -137,11 +138,11 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None)
     # The labelling is a deterministic function of the graph, so it is computed once and cached in
     # the dataset's processed directory, following add_eig_vecs' sidecar contract below: a ranking
     # run starts one process per config and would otherwise repeat it on every start. Measured on
-    # ogbg-ppa's 158,100 graphs: 2.87 ms/graph, so 7.6 minutes labelled against 2.6 minutes for the
-    # digest, permute and re-collate a cache hit still pays — ~90 minutes saved over a twelve-config
-    # ranking. What is cached is the PERMUTATION rather than the permuted graphs — 38.5M int64 is
-    # 308 MB against the ~29 GiB the canonicalized store itself occupies, and old2new, edge_index
-    # and edge_attr are all cheap functions of it.
+    # ogbg-ppa's 158,100 graphs under this vertex-only rule: 2.87 ms/graph, so 7.6 minutes labelled
+    # against 2.6 minutes for the digest, permute and re-collate a cache hit still pays — ~90
+    # minutes saved over a twelve-config ranking. What is cached is the PERMUTATION rather than the
+    # permuted graphs — on ppa, 38.5M int64 is 308 MB against the ~29 GiB the canonicalized store
+    # itself occupies — and old2new, edge_index and edge_attr are all cheap functions of it.
     #
     # The digest is taken over the PRE-canonicalization graph, for two reasons. On a cache hit the
     # canonical order does not exist yet, so keying on it would mean doing the work the key exists
@@ -180,11 +181,11 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None)
     # Pinned to one thread for the same reason add_eig_vecs is, and the effect here is larger. Every
     # tensor operation in the loop is graph-sized — a gather over one edge_index, an argsort of a few
     # thousand entries — so letting torch fan out costs far more in thread-launch overhead than it
-    # saves: measured on ogbg-ppa, unpinned the loop took 45 cores (4497% CPU over 191 threads) and
-    # had not finished 158,100 graphs in 21 minutes, against 2 threads doing ~2.3 ms/graph. It also
-    # keeps the loop from monopolizing a machine this project shares. A process pool is the
-    # alternative and is deliberately not taken: it would need module-level globals and a
-    # fork-safety guarantee this project has not established for pynauty.
+    # saves: measured on ogbg-ppa under this vertex-only rule, unpinned the loop took 45 cores
+    # (4497% CPU over 191 threads) and had not finished 158,100 graphs in 21 minutes, against 2
+    # threads doing ~2.3 ms/graph. It also keeps the loop from monopolizing a machine this project
+    # shares. A process pool is the alternative and is deliberately not taken: it would need
+    # module-level globals and a fork-safety guarantee this project has not established for pynauty.
     num_threads = torch.get_num_threads()
     torch.set_num_threads(1)
     canon_graphs = [canonicalize_graph(graph, sort_y, perm)
@@ -198,8 +199,9 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None)
     # Release the source store BEFORE collating. Every per-node and per-edge tensor the loop above
     # produced is a fresh one, so the dataset itself is all that still references the old store —
     # including `_data_list`, whose cached per-graph views would otherwise pin it past the setter
-    # that clears them. On EXP/CEXP that is bookkeeping; on ogbg-ppa the store is ~29 GiB and
-    # holding it across the collate is the difference between a ~59 GiB and an ~88 GiB peak.
+    # that clears them. On EXP/CEXP that is bookkeeping; on ogbg-ppa, measured under this
+    # vertex-only rule, the store is ~29 GiB and holding it across the collate is the difference
+    # between a ~59 GiB and an ~88 GiB peak.
     dataset._data_list = None
     dataset._data = None
 
@@ -308,6 +310,7 @@ def canonicalize_graphs_edge_colored(dataset: InMemoryDataset, sort_y=False, cac
         torch.save({'digest': digest.hexdigest(),
                     'new2old': torch.cat([graph.new2old for graph in canon_graphs])}, cache_path)
 
+    # Store released before collating, for the reason canonicalize_graphs gives (ppa: ~29 GiB).
     dataset._data_list = None
     dataset._data = None
 
