@@ -1,0 +1,34 @@
+experiment_name: ldna_brec_mlpaggr
+
+# Aggregator comparison on BREC, PyG MLPAggregation arm. Identical to ldna_brec_gateinit.yaml (the
+# reported 321) except `rank_mode: none` (no rank gate), `aggr_mode: mlp` and
+# `max_num_elements: 30` (the dataset-wide maximum in-degree): each LDNAConv aggregates its
+# unmodulated messages with PyG's MLPAggregation, reading them in the neighbours' nauty canonical
+# order. `gate_init_std` is kept as in ldna_brec_ungated.yaml; the gate it initializes is
+# never used.
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+  rank_mode: none
+  aggr_mode: mlp
+  max_num_elements: 30
+  gate_init_std: 0.1
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 1
+seed: 42
+s_epsilon: true
+log_dir: out/logs/

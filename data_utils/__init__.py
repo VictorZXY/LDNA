@@ -20,7 +20,7 @@ if not getattr(_torch.load, "_ldna_weights_only_patched", False):
     _torch.load = _ldna_torch_load
 # -----------------------------------------------------------------------------
 
-from .preprocess import add_eig_vec, add_eig_vecs, add_node_ranks, canonicalize_graph, canonicalize_graphs, degree_histogram, node_rank, sort_graph, sort_graphs
+from .preprocess import add_eig_vec, add_eig_vecs, add_node_ranks, canonicalize_graph, canonicalize_graphs, canonicalize_graphs_edge_colored, degree_histogram, edge_colored_canon_label, node_rank, sort_graph, sort_graphs
 from .transforms import RemoveEdgeAttr, UnsqueezeTargetDim
 
 __all__ = [
@@ -29,7 +29,9 @@ __all__ = [
     'add_node_ranks',
     'canonicalize_graph',
     'canonicalize_graphs',
+    'canonicalize_graphs_edge_colored',
     'degree_histogram',
+    'edge_colored_canon_label',
     'node_rank',
     'sort_graph',
     'sort_graphs',

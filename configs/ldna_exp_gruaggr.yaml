@@ -1,0 +1,52 @@
+experiment_name: ldna_exp_gruaggr
+
+# Aggregator comparison on EXP, PyG GRUAggregation arm. Identical to ldna_exp.yaml except
+# `rank_mode: none` (no rank gate), `aggr_mode: gru` and `max_num_elements: 6` (the
+# dataset-wide maximum in-degree): each LDNAConv aggregates its unmodulated messages with PyG's
+# GRUAggregation, reading them in the neighbours' nauty canonical order.
+# Same protocol as the gated arm: three full 10-fold sweeps, launched as
+# `--seed <s> --experiment_name ldna_exp_gruaggr_seed<s>` for s in 42, 43, 44.
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.0
+  readout: attention
+  residual: true
+  rank_mode: none
+  aggr_mode: gru
+  max_num_elements: 6
+
+# Dataset specific arguments/hyperparameters
+dataset: EXP
+data_args:
+  root: data/exp/
+  batch_size: 20
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 0
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+    factor: 0.7
+    patience: 5
+    min_lr: 1.0e-3
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/

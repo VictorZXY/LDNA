@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch_geometric.nn.aggr import GRUAggregation, MLPAggregation
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.models import MLP
 from torch_scatter import scatter
@@ -7,7 +8,8 @@ from torch_scatter import scatter
 
 class LDNAConv(MessagePassing):
     def __init__(self, in_channels, out_channels, edge_dim=None, num_pre_layers=1, num_post_layers=1,
-                 gate_hidden_channels=32, gate_init_std=0.0, **kwargs):
+                 gate_hidden_channels=32, gate_init_std=0.0, aggr_mode='sum', max_num_elements=None,
+                 **kwargs):
         super(LDNAConv, self).__init__(aggr=None, **kwargs)
 
         self.in_channels = in_channels
@@ -41,6 +43,27 @@ class LDNAConv(MessagePassing):
         self.post_nn = MLP(in_channels=in_channels, hidden_channels=out_channels,
                            out_channels=out_channels, num_layers=num_post_layers)
 
+        # Aggregation unit over the (gated) messages of each target node. 'sum' is LDNA's own and
+        # builds nothing. 'mlp' / 'gru' are PyG's order-sensitive MLPAggregation / GRUAggregation,
+        # the aggregator-comparison arms: each reads a node's messages as a sequence in increasing
+        # source index, which is the canonical position on nauty-canonicalized data, so the model is
+        # exactly permutation-invariant there and nowhere else. `max_num_elements` (the dataset-wide
+        # maximum in-degree) is fixed rather than left to `to_dense_batch`, which otherwise pads to
+        # the batch maximum and makes GRUAggregation's last step depend on which graphs share a batch.
+        if aggr_mode not in ('sum', 'mlp', 'gru'):
+            raise ValueError(f"Argument `aggr_mode` must be 'sum', 'mlp' or 'gru', got '{aggr_mode}'")
+        if aggr_mode != 'sum' and max_num_elements is None:
+            raise ValueError(f"Argument `max_num_elements` must be given for `aggr_mode='{aggr_mode}'`")
+        self.aggr_mode = aggr_mode
+        self.max_num_elements = max_num_elements
+        if aggr_mode == 'mlp':
+            self.aggr_nn = MLPAggregation(in_channels, in_channels, max_num_elements=max_num_elements,
+                                          hidden_channels=in_channels, num_layers=2)
+        elif aggr_mode == 'gru':
+            self.aggr_nn = GRUAggregation(in_channels, in_channels)
+        else:
+            self.aggr_nn = None
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -61,6 +84,8 @@ class LDNAConv(MessagePassing):
         else:
             nn.init.zeros_(self.gate_nn[2].weight)
         nn.init.zeros_(self.gate_nn[2].bias)
+        if self.aggr_nn is not None:
+            self.aggr_nn.reset_parameters()
 
     def forward(self, x, edge_index, edge_attr=None, nrank=None):
         out = self.propagate(edge_index, x=x, edge_attr=edge_attr, nrank=nrank)
@@ -84,6 +109,24 @@ class LDNAConv(MessagePassing):
         return m
 
     def aggregate(self, inputs, index, ptr=None, dim_size=None):
-        out = scatter(inputs, index, dim=0, dim_size=dim_size, reduce='sum')
+        if self.aggr_nn is None:
+            out = scatter(inputs, index, dim=0, dim_size=dim_size, reduce='sum')
 
-        return out
+            return out
+
+        # The dense aggregators need `index` sorted. The data-side sort orders edges by (source,
+        # target), so a STABLE sort by target keeps each target's messages in increasing source
+        # index; PyG batching offsets node indices per graph, which preserves that order.
+        perm = torch.argsort(index, stable=True)
+        inputs, index = inputs[perm], index[perm]
+        # `to_dense_batch` silently drops elements past `max_num_elements`, so an in-degree above it
+        # is an error here rather than a truncated neighbourhood.
+        if index.numel() > 0:
+            max_degree = int(torch.bincount(index).max())
+            if max_degree > self.max_num_elements:
+                raise ValueError(f"In-degree {max_degree} exceeds `max_num_elements` "
+                                 f"({self.max_num_elements})")
+        if self.aggr_mode == 'gru':
+            return self.aggr_nn(inputs, index, dim_size=dim_size, max_num_elements=self.max_num_elements)
+
+        return self.aggr_nn(inputs, index, dim_size=dim_size)

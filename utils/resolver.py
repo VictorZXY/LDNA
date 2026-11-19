@@ -13,7 +13,8 @@ from torch_geometric.datasets import (GNNBenchmarkDataset, HeterophilousGraphDat
 from torch_geometric.loader import DataLoader
 
 import models
-from data_utils import add_eig_vecs, canonicalize_graphs, degree_histogram, node_rank, sort_graphs
+from data_utils import (add_eig_vecs, canonicalize_graphs, canonicalize_graphs_edge_colored, degree_histogram,
+                        node_rank, sort_graphs)
 from data_utils.code2 import encode_y_to_arr, get_vocab_mapping
 from data_utils.exp import PlanarSATPairsDataset
 from data_utils.transforms import (AddDepthField, AddDepthToX, AddPosField, RemoveEdgeAttr,
@@ -173,19 +174,31 @@ def model_and_data_resolver(model_query, dataset_query, **kwargs):
     elif dataset_query == 'ZINC':
         transform = UnsqueezeTargetDim()
         subset = dataset_kwargs.pop('subset', False)
+        # `nauty_canonical` replaces the feature lexsort, whose atom-type ties leave the node order
+        # arbitrary, with the edge-coloured nauty labelling: a tie-free order identical across
+        # isomorphic molecules, bond types included, so models that read node or neighbour order are
+        # exactly permutation-invariant. The labelling is cached per split in processed_dir.
+        nauty_canonical = dataset_kwargs.pop('nauty_canonical', False)
         train_dataset = ZINC(subset=subset, split='train', pre_transform=transform, **dataset_kwargs)
         val_dataset = ZINC(subset=subset, split='val', pre_transform=transform, **dataset_kwargs)
         test_dataset = ZINC(subset=subset, split='test', pre_transform=transform, **dataset_kwargs)
 
-        train_dataset = sort_graphs(train_dataset, sort_y=False)
-        val_dataset = sort_graphs(val_dataset, sort_y=False)
-        test_dataset = sort_graphs(test_dataset, sort_y=False)
+        if nauty_canonical:
+            train_dataset = canonicalize_graphs_edge_colored(train_dataset, cache_name='train')
+            val_dataset = canonicalize_graphs_edge_colored(val_dataset, cache_name='val')
+            test_dataset = canonicalize_graphs_edge_colored(test_dataset, cache_name='test')
+        else:
+            train_dataset = sort_graphs(train_dataset, sort_y=False)
+            val_dataset = sort_graphs(val_dataset, sort_y=False)
+            test_dataset = sort_graphs(test_dataset, sort_y=False)
 
         if model_query == 'DGN':
+            # The cache name carries the order, as BREC's does, so the two never overwrite each other.
             num_eig_vec = model_kwargs.get('num_eig_vec', 1)
-            train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train')
-            val_dataset = add_eig_vecs(val_dataset, k=num_eig_vec, cache_name='val')
-            test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test')
+            suffix = '_nauty' if nauty_canonical else ''
+            train_dataset = add_eig_vecs(train_dataset, k=num_eig_vec, cache_name='train' + suffix)
+            val_dataset = add_eig_vecs(val_dataset, k=num_eig_vec, cache_name='val' + suffix)
+            test_dataset = add_eig_vecs(test_dataset, k=num_eig_vec, cache_name='test' + suffix)
     elif dataset_query in ['Peptides-func', 'Peptides-struct']:
         # The two LRGB peptide tasks are the SAME graphs with different targets — 10 binary labels
         # for -func, 11 regression targets for -struct — so one branch covers both and `name`

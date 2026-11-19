@@ -12,6 +12,10 @@ from torch_geometric.utils import degree, sort_edge_index, to_dense_adj
 # pynauty version underneath it does.
 CANON_RULE_VERSION = 'v1'
 
+# The same for the edge-coloured labelling (edge_colored_canon_label), versioned separately so a
+# cache of one rule can never validate as the other's.
+EDGE_CANON_RULE_VERSION = 'v1'
+
 
 def sort_graph(graph: Data, sort_y=False):
     x_arr = graph.x.numpy()
@@ -196,6 +200,112 @@ def canonicalize_graphs(dataset: InMemoryDataset, sort_y=False, cache_name=None)
     # including `_data_list`, whose cached per-graph views would otherwise pin it past the setter
     # that clears them. On EXP/CEXP that is bookkeeping; on ogbg-ppa the store is ~29 GiB and
     # holding it across the collate is the difference between a ~59 GiB and an ~88 GiB peak.
+    dataset._data_list = None
+    dataset._data = None
+
+    dataset.data, dataset.slices = dataset.collate(canon_graphs)
+    return dataset
+
+
+def edge_colored_canon_label(graph: Data):
+    # canonicalize_graph's labelling colours vertices by `x` only, so on a graph with edge attributes
+    # (ZINC's bond types) two copies that differ only in which bond sits where can get different
+    # canonical forms, and the canonical edge_attr is then not invariant. nauty colours vertices
+    # only, so the edge attributes enter through the standard subdivision: each undirected edge
+    # {u, v} becomes a new vertex adjacent to u and v, coloured by its attribute row. The ordered
+    # partition is the original-vertex cells (by feature row, lexicographic) followed by the
+    # edge-vertex cells (by attribute row, lexicographic); both orders are permutation-invariant, so
+    # the labelling of the attributed graph is isomorphism-invariant. Returns new2old over the
+    # original vertices, for canonicalize_graph to apply.
+    import pynauty  # optional heavy dependency; only imported where a labelling is computed
+
+    n = graph.num_nodes
+    src, dst = graph.edge_index.tolist()
+    attrs = [tuple(row) for row in graph.edge_attr.reshape(len(src), -1).tolist()]
+
+    # The subdivision encodes an undirected simple graph, so a self-loop, a missing reverse edge or
+    # a pair whose two directions disagree would silently drop out of the canonical form.
+    directed = {}
+    for a, b, attr in zip(src, dst, attrs):
+        if a == b:
+            raise ValueError(f"Edge-coloured canonical labelling needs a graph without self-loops; "
+                             f"node {a} has one")
+        if directed.setdefault((a, b), attr) != attr:
+            raise ValueError(f"Edge ({a}, {b}) appears twice with different attributes")
+    for (a, b), attr in directed.items():
+        if directed.get((b, a)) != attr:
+            raise ValueError(f"Edge-coloured canonical labelling needs an undirected graph with "
+                             f"symmetric attributes; edge ({a}, {b}) has no matching reverse")
+
+    adjacency = {i: [] for i in range(n)}
+    edge_cells = {}
+    for (a, b), attr in sorted(directed.items()):
+        if a < b:
+            e = len(adjacency)
+            adjacency[e] = [a, b]
+            adjacency[a].append(e)
+            adjacency[b].append(e)
+            edge_cells.setdefault(attr, set()).add(e)
+
+    if graph.x is not None:
+        rows = [tuple(row) for row in graph.x.tolist()]
+        cells = {row: set() for row in rows}
+        for node, row in enumerate(rows):
+            cells[row].add(node)
+        vertex_coloring = [cells[row] for row in sorted(cells)]
+    else:
+        vertex_coloring = [set(range(n))] if n > 0 else []
+    vertex_coloring += [edge_cells[attr] for attr in sorted(edge_cells)]
+
+    canon = pynauty.canon_label(pynauty.Graph(len(adjacency), False, adjacency, vertex_coloring))
+
+    # nauty keeps each cell's vertices in one contiguous block of canonical positions, in cell
+    # order, so the original vertices occupy positions 0..n-1. Checked rather than assumed, since
+    # an edge vertex there would make new2old index past the graph.
+    new2old = torch.as_tensor(canon[:n]).long()
+    if n > 0 and not bool((new2old.sort().values == torch.arange(n)).all()):
+        raise RuntimeError("nauty placed an edge vertex among the first n canonical positions")
+
+    return new2old
+
+
+def canonicalize_graphs_edge_colored(dataset: InMemoryDataset, sort_y=False, cache_name=None):
+    # canonicalize_graphs with the edge-coloured labelling above, for datasets with categorical edge
+    # attributes (ZINC). Same permutation cache contract — the digest is taken over the
+    # pre-canonicalization graph and the file named after the rule — with edge_attr hashed as well,
+    # since the labelling reads it, and its own rule tag and file name, so the two rules' caches
+    # never collide.
+    all_graphs = [dataset.get(i) for i in range(len(dataset))]
+    num_nodes = [graph.num_nodes for graph in all_graphs]
+
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(EDGE_CANON_RULE_VERSION.encode())
+    for graph in all_graphs:
+        digest.update(str(graph.num_nodes).encode())
+        digest.update(graph.edge_index.numpy().tobytes())
+        digest.update(graph.edge_attr.numpy().tobytes())
+        if graph.x is not None:
+            digest.update(graph.x.numpy().tobytes())
+
+    cache_path = None if cache_name is None else \
+        os.path.join(dataset.processed_dir, f'{cache_name}_edge_canon_{EDGE_CANON_RULE_VERSION}.pt')
+    cache = torch.load(cache_path) if cache_path is not None and os.path.exists(cache_path) else None
+    valid_cache = isinstance(cache, dict) and cache.get('digest') == digest.hexdigest() \
+        and isinstance(cache.get('new2old'), torch.Tensor) \
+        and cache['new2old'].shape == (sum(num_nodes),)
+
+    # Single-threaded for the reason canonicalize_graphs gives: every tensor operation is graph-sized.
+    num_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    perms = list(cache['new2old'].split(num_nodes)) if valid_cache \
+        else [edge_colored_canon_label(graph) for graph in all_graphs]
+    canon_graphs = [canonicalize_graph(graph, sort_y, perm) for graph, perm in zip(all_graphs, perms)]
+    torch.set_num_threads(num_threads)
+
+    if not valid_cache and cache_path is not None:
+        torch.save({'digest': digest.hexdigest(),
+                    'new2old': torch.cat([graph.new2old for graph in canon_graphs])}, cache_path)
+
     dataset._data_list = None
     dataset._data = None
 
