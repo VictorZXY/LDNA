@@ -135,28 +135,23 @@ class LDNAConv(MessagePassing):
                 raise ValueError(f"In-degree {max_degree} exceeds `max_num_elements` "
                                  f"({self.max_num_elements})")
         if self.aggr_mode in ('gru_packed', 'lstm_packed'):
-            return self._packed_aggregate(inputs, index, dim_size)
+            return self._real_length_aggregate(inputs, index, dim_size)
         if self.aggr_mode in ('gru', 'lstm'):
             return self.aggr_nn(inputs, index, dim_size=dim_size, max_num_elements=self.max_num_elements)
 
         return self.aggr_nn(inputs, index, dim_size=dim_size)
 
-    def _packed_aggregate(self, inputs, index, dim_size):
-        # Runs the aggregator's own GRU/LSTM over each node's real neighbour sequence (a packed
-        # sequence, so no padding step is fed in or read) and returns its final hidden state; a node
-        # without neighbours gets zeros, the recurrent initial state.
+    def _real_length_aggregate(self, inputs, index, dim_size):
+        # The aggregator's own GRU/LSTM runs over the zero-padded sequence, and each node's output is
+        # read at its last real neighbour. A recurrent output at step t depends on steps <= t only, so
+        # this is the final hidden state of the real-length (packed) sequence, without the host sync
+        # packing needs; a node without neighbours gets zeros, the recurrent initial state.
         x, mask = self.aggr_nn.to_dense_batch(inputs, index, dim_size=dim_size,
                                               max_num_elements=self.max_num_elements)
+        rnn = self.aggr_nn.gru if self.aggr_mode == 'gru_packed' else self.aggr_nn.lstm
+        seq = rnn(x)[0]
         lengths = mask.sum(dim=1)
-        out = inputs.new_zeros(x.size(0), self.aggr_nn.out_channels)
-        has_neighbors = lengths > 0
-        if bool(has_neighbors.any()):
-            rnn = self.aggr_nn.gru if self.aggr_mode == 'gru_packed' else self.aggr_nn.lstm
-            packed = nn.utils.rnn.pack_padded_sequence(x[has_neighbors], lengths[has_neighbors].cpu(),
-                                                       batch_first=True, enforce_sorted=False)
-            h_n = rnn(packed)[1]
-            if isinstance(h_n, tuple):
-                h_n = h_n[0]
-            out[has_neighbors] = h_n[-1]
+        last = (lengths - 1).clamp(min=0).view(-1, 1, 1).expand(-1, 1, seq.size(-1))
+        out = seq.gather(1, last).squeeze(1)
 
-        return out
+        return out * (lengths > 0).unsqueeze(-1).to(out.dtype)
