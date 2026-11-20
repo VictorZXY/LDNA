@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torch_geometric.nn.aggr import GRUAggregation, MLPAggregation
+from torch_geometric.nn.aggr import GRUAggregation, LSTMAggregation, MLPAggregation
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.models import MLP
 from torch_scatter import scatter
@@ -44,14 +44,20 @@ class LDNAConv(MessagePassing):
                            out_channels=out_channels, num_layers=num_post_layers)
 
         # Aggregation unit over the (gated) messages of each target node. 'sum' is LDNA's own and
-        # builds nothing. 'mlp' / 'gru' are PyG's order-sensitive MLPAggregation / GRUAggregation,
-        # the aggregator-comparison arms: each reads a node's messages as a sequence in increasing
-        # source index, which is the canonical position on nauty-canonicalized data, so the model is
-        # exactly permutation-invariant there and nowhere else. `max_num_elements` (the dataset-wide
-        # maximum in-degree) is fixed rather than left to `to_dense_batch`, which otherwise pads to
-        # the batch maximum and makes GRUAggregation's last step depend on which graphs share a batch.
-        if aggr_mode not in ('sum', 'mlp', 'gru'):
-            raise ValueError(f"Argument `aggr_mode` must be 'sum', 'mlp' or 'gru', got '{aggr_mode}'")
+        # builds nothing. The others are PyG's order-sensitive aggregators, the aggregator-comparison
+        # arms: each reads a node's messages as a sequence in increasing source index, which is the
+        # canonical position on nauty-canonicalized data, so the model is exactly permutation-
+        # invariant there and nowhere else. 'mlp' / 'gru' / 'lstm' are MLPAggregation /
+        # GRUAggregation / LSTMAggregation as PyG ships them: the recurrent two zero-pad each
+        # sequence to `max_num_elements` and output the last padded step. 'gru_packed' /
+        # 'lstm_packed' deviate from that: same modules, but each sequence holds the real neighbours
+        # only and the output is the final hidden state at the last real neighbour. A fixed
+        # `max_num_elements` (the dataset-wide maximum in-degree) replaces `to_dense_batch`'s
+        # batch-maximum padding, under which the stock recurrent output depends on which graphs
+        # share a batch.
+        if aggr_mode not in ('sum', 'mlp', 'gru', 'gru_packed', 'lstm', 'lstm_packed'):
+            raise ValueError(f"Argument `aggr_mode` must be 'sum', 'mlp', 'gru', 'gru_packed', 'lstm' "
+                             f"or 'lstm_packed', got '{aggr_mode}'")
         if aggr_mode != 'sum' and max_num_elements is None:
             raise ValueError(f"Argument `max_num_elements` must be given for `aggr_mode='{aggr_mode}'`")
         self.aggr_mode = aggr_mode
@@ -59,8 +65,10 @@ class LDNAConv(MessagePassing):
         if aggr_mode == 'mlp':
             self.aggr_nn = MLPAggregation(in_channels, in_channels, max_num_elements=max_num_elements,
                                           hidden_channels=in_channels, num_layers=2)
-        elif aggr_mode == 'gru':
+        elif aggr_mode in ('gru', 'gru_packed'):
             self.aggr_nn = GRUAggregation(in_channels, in_channels)
+        elif aggr_mode in ('lstm', 'lstm_packed'):
+            self.aggr_nn = LSTMAggregation(in_channels, in_channels)
         else:
             self.aggr_nn = None
 
@@ -126,7 +134,29 @@ class LDNAConv(MessagePassing):
             if max_degree > self.max_num_elements:
                 raise ValueError(f"In-degree {max_degree} exceeds `max_num_elements` "
                                  f"({self.max_num_elements})")
-        if self.aggr_mode == 'gru':
+        if self.aggr_mode in ('gru_packed', 'lstm_packed'):
+            return self._packed_aggregate(inputs, index, dim_size)
+        if self.aggr_mode in ('gru', 'lstm'):
             return self.aggr_nn(inputs, index, dim_size=dim_size, max_num_elements=self.max_num_elements)
 
         return self.aggr_nn(inputs, index, dim_size=dim_size)
+
+    def _packed_aggregate(self, inputs, index, dim_size):
+        # Runs the aggregator's own GRU/LSTM over each node's real neighbour sequence (a packed
+        # sequence, so no padding step is fed in or read) and returns its final hidden state; a node
+        # without neighbours gets zeros, the recurrent initial state.
+        x, mask = self.aggr_nn.to_dense_batch(inputs, index, dim_size=dim_size,
+                                              max_num_elements=self.max_num_elements)
+        lengths = mask.sum(dim=1)
+        out = inputs.new_zeros(x.size(0), self.aggr_nn.out_channels)
+        has_neighbors = lengths > 0
+        if bool(has_neighbors.any()):
+            rnn = self.aggr_nn.gru if self.aggr_mode == 'gru_packed' else self.aggr_nn.lstm
+            packed = nn.utils.rnn.pack_padded_sequence(x[has_neighbors], lengths[has_neighbors].cpu(),
+                                                       batch_first=True, enforce_sorted=False)
+            h_n = rnn(packed)[1]
+            if isinstance(h_n, tuple):
+                h_n = h_n[0]
+            out[has_neighbors] = h_n[-1]
+
+        return out

@@ -1,0 +1,37 @@
+experiment_name: ldna_brec_lstmaggr_packed
+
+# Aggregator comparison on BREC, real-length LSTM arm. Identical to ldna_brec_gateinit.yaml (the
+# reported 321) except `rank_mode: none` (no rank gate), `aggr_mode: lstm_packed` and
+# `max_num_elements: 30` (the dataset-wide maximum in-degree):
+# each LDNAConv runs PyG LSTMAggregation's LSTM over its unmodulated messages in the
+# neighbours' nauty canonical order, over the real neighbours only (a packed sequence), and
+# returns the final hidden state at the last one; stock LSTMAggregation (ldna_brec_lstmaggr) instead
+# outputs the last step of the zero-padded sequence.
+# `gate_init_std` is kept as in ldna_brec_ungated.yaml; the gate it initializes is never
+# used.
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  dropout: 0.0
+  readout: attention
+  residual: true
+  batch_norm: true
+  rank_mode: none
+  aggr_mode: lstm_packed
+  max_num_elements: 30
+  gate_init_std: 0.1
+
+# Dataset specific arguments/hyperparameters
+dataset: BREC
+data_args:
+  root: data/brec
+
+# Evaluation specific arguments/hyperparameters
+cuda: 1
+seed: 42
+s_epsilon: true
+log_dir: out/logs/

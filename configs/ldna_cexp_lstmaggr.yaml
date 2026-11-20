@@ -1,0 +1,53 @@
+experiment_name: ldna_cexp_lstmaggr
+
+# Aggregator comparison on CEXP, PyG LSTMAggregation arm. Identical to ldna_cexp.yaml except
+# `rank_mode: none` (no rank gate), `aggr_mode: lstm` and `max_num_elements: 6`
+# (the dataset-wide maximum in-degree):
+# each LDNAConv aggregates its unmodulated messages with PyG's LSTMAggregation as shipped
+# (zero-padded to `max_num_elements`, last padded step), reading them in the neighbours' nauty
+# canonical order.
+# Same protocol as the gated arm: one 10-fold sweep at seed 42.
+
+# Model specific arguments/hyperparameters
+model: LDNA
+model_args:
+  hidden_channels: 64
+  out_channels: 64
+  num_layers: 8
+  num_pre_layers: 1
+  num_post_layers: 1
+  num_pred_layers: 3
+  dropout: 0.0
+  readout: attention
+  residual: true
+  rank_mode: none
+  aggr_mode: lstm
+  max_num_elements: 6
+
+# Dataset specific arguments/hyperparameters
+dataset: CEXP
+data_args:
+  root: data/cexp/
+  batch_size: 20
+
+# Training specific arguments/hyperparameters
+cuda: 0
+seed: 42
+train_args:
+  runs: 10
+  epochs: 500
+  eval_interval: 50
+  loss_fn: CrossEntropyLoss
+  optimizer: Adam
+  optimizer_kwargs:
+    lr: 1.0e-3
+    weight_decay: 0
+  scheduler: ReduceLROnPlateau
+  scheduler_kwargs:
+    mode: max
+    factor: 0.7
+    patience: 5
+    min_lr: 1.0e-3
+  evaluator: AccuracyEvaluator
+checkpoint_dir: out/checkpoints/
+log_dir: out/logs/
