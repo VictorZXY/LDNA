@@ -14,7 +14,7 @@ CANON_RULE_VERSION = 'v1'
 
 # The same for the edge-coloured labelling (edge_colored_canon_label), versioned separately so a
 # cache of one rule can never validate as the other's.
-EDGE_CANON_RULE_VERSION = 'v1'
+EDGE_CANON_RULE_VERSION = 'v2'
 
 
 def sort_graph(graph: Data, sort_y=False):
@@ -215,29 +215,38 @@ def edge_colored_canon_label(graph: Data):
     # which attribute row sits on which edge can get different canonical forms, and the canonical
     # edge_attr is then not invariant. nauty colours vertices only, so the edge attributes enter
     # through the standard subdivision: each undirected edge {u, v} becomes a new vertex adjacent to
-    # u and v, coloured by its attribute row. The ordered partition is the original-vertex cells (by
-    # feature row, lexicographic; one cell when `x` is None) followed by the edge-vertex cells (by
-    # attribute row, lexicographic); both orders are permutation-invariant, so the labelling of the
-    # attributed graph is isomorphism-invariant. Rows are compared exactly, so continuous rows
-    # colour the same way categorical ones do. Returns new2old over the original vertices, for
-    # canonicalize_graph to apply.
+    # u and v, coloured by its attribute row and its number of copies (1 on a simple graph). The
+    # ordered partition is the original-vertex cells (by feature row, lexicographic; one cell when
+    # `x` is None) followed by the edge-vertex cells (by attribute row, lexicographic, then copy
+    # count); both orders are permutation-invariant, so the labelling of the attributed graph is
+    # isomorphism-invariant. Rows are compared exactly, so continuous rows colour the same way
+    # categorical ones do. Returns new2old over the original vertices, for canonicalize_graph to
+    # apply.
     import pynauty  # optional heavy dependency; only imported where a labelling is computed
 
     n = graph.num_nodes
     src, dst = graph.edge_index.tolist()
-    attrs = [tuple(row) for row in graph.edge_attr.reshape(len(src), -1).tolist()]
+    # reshape cannot infer the row width of an empty edge_attr, and a graph without edges has no
+    # rows to read: its labelling is the vertex colouring alone.
+    attrs = [tuple(row) for row in graph.edge_attr.reshape(len(src), -1).tolist()] if src else []
 
-    # The subdivision encodes an undirected simple graph, so a self-loop, a missing reverse edge or
-    # a pair whose two directions disagree would silently drop out of the canonical form.
-    directed = {}
+    # The subdivision encodes an undirected graph, so a self-loop, a missing reverse edge or a pair
+    # whose two directions disagree would silently drop out of the canonical form. The copies of a
+    # repeated edge share one subdivision vertex, so their count goes into its colour below: without
+    # it the labelling would see only the simple graph underneath while canonicalize_graph keeps
+    # every copy, and which pair the extra copies land on would depend on the input numbering.
+    # Copies with different rows still raise, since canonicalize_graph's re-sort orders edges by
+    # their endpoints alone and would leave those rows in an order the input decides.
+    directed, multiplicity = {}, {}
     for a, b, attr in zip(src, dst, attrs):
         if a == b:
             raise ValueError(f"Edge-coloured canonical labelling needs a graph without self-loops; "
                              f"node {a} has one")
         if directed.setdefault((a, b), attr) != attr:
             raise ValueError(f"Edge ({a}, {b}) appears twice with different attributes")
+        multiplicity[(a, b)] = multiplicity.get((a, b), 0) + 1
     for (a, b), attr in directed.items():
-        if directed.get((b, a)) != attr:
+        if directed.get((b, a)) != attr or multiplicity[(b, a)] != multiplicity[(a, b)]:
             raise ValueError(f"Edge-coloured canonical labelling needs an undirected graph with "
                              f"symmetric attributes; edge ({a}, {b}) has no matching reverse")
 
@@ -249,7 +258,9 @@ def edge_colored_canon_label(graph: Data):
             adjacency[e] = [a, b]
             adjacency[a].append(e)
             adjacency[b].append(e)
-            edge_cells.setdefault(attr, set()).add(e)
+            # Every count is 1 on a simple graph, so the cells and their order are those of the
+            # row alone.
+            edge_cells.setdefault((attr, multiplicity[(a, b)]), set()).add(e)
 
     if graph.x is not None:
         rows = [tuple(row) for row in graph.x.tolist()]
@@ -259,7 +270,7 @@ def edge_colored_canon_label(graph: Data):
         vertex_coloring = [cells[row] for row in sorted(cells)]
     else:
         vertex_coloring = [set(range(n))] if n > 0 else []
-    vertex_coloring += [edge_cells[attr] for attr in sorted(edge_cells)]
+    vertex_coloring += [edge_cells[colour] for colour in sorted(edge_cells)]
 
     canon = pynauty.canon_label(pynauty.Graph(len(adjacency), False, adjacency, vertex_coloring))
 
