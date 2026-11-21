@@ -144,8 +144,11 @@ class LDNAConv(MessagePassing):
     def _real_length_aggregate(self, inputs, index, dim_size):
         # The aggregator's own GRU/LSTM runs over the zero-padded sequence, and each node's output is
         # read at its last real neighbour. A recurrent output at step t depends on steps <= t only, so
-        # this is the final hidden state of the real-length (packed) sequence, without the host sync
-        # packing needs; a node without neighbours gets zeros, the recurrent initial state.
+        # this is the final hidden state of the real-length (packed) sequence; a node without
+        # neighbours gets zeros, the recurrent initial state. Reading in place skips the host copy of
+        # the lengths that packing needs, but the path is not sync-free: the in-degree check in
+        # aggregate() and the sorted-index and size checks inside PyG's to_dense_batch each read a
+        # device value on the host, every layer.
         x, mask = self.aggr_nn.to_dense_batch(inputs, index, dim_size=dim_size,
                                               max_num_elements=self.max_num_elements)
         rnn = self.aggr_nn.gru if self.aggr_mode == 'gru_packed' else self.aggr_nn.lstm

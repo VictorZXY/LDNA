@@ -4,8 +4,9 @@ experiment_name: gin_brec_rankfeat
 # adds each node's normalized nauty canonical position (the quantity LDNA reads under
 # `rank_mode: position`) to the encoded node features through a Linear(1, d) before the first conv.
 # BRECDataset canonicalizes by default (`canonical: true`), so this is the order LDNA reads. The
-# position map sits in the backbone and is re-initialized per pair with it; the shared Linear(1, d)
-# node encoder is not (see data_utils/brec.py).
+# position map sits in the backbone and is re-initialized per pair with it. The shared Linear(1, d)
+# node encoder is not: the per-pair BRECModel.reset_parameters() calls GIN.reset_parameters(),
+# which leaves `node_encoder` alone, so the encoder carries its trained weights from pair to pair.
 
 # Model specific arguments/hyperparameters
 model: GIN

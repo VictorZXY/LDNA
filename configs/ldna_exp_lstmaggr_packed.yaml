@@ -4,9 +4,9 @@ experiment_name: ldna_exp_lstmaggr_packed
 # `rank_mode: none` (no rank gate), `aggr_mode: lstm_packed` and `max_num_elements: 6`
 # (the dataset-wide maximum in-degree):
 # each LDNAConv runs PyG LSTMAggregation's LSTM over its unmodulated messages in the
-# neighbours' nauty canonical order, over the real neighbours only (a packed sequence), and
-# returns the final hidden state at the last one; stock LSTMAggregation (ldna_exp_lstmaggr) instead
-# outputs the last step of the zero-padded sequence.
+# neighbours' nauty canonical order, zero-padded to `max_num_elements`, and reads the output at
+# the last real neighbour, which is the final hidden state over the real neighbours alone; stock
+# LSTMAggregation (ldna_exp_lstmaggr) instead outputs the last step of the zero-padded sequence.
 # Same protocol as the gated arm: three full 10-fold sweeps, launched as
 # `--seed <s> --experiment_name ldna_exp_lstmaggr_packed_seed<s>` for s in 42, 43, 44.
 
