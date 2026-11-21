@@ -696,7 +696,7 @@ Everything else differs because one epoch is **one optimizer step**, not 130–6
   applied identically to every model on every dataset, which is what § Objective's
   relative-ranking criterion rests on, and rankings and deciding metrics stay in its terms.
   **A validation-selected test** (test at the best-validation epoch, first occurrence) is
-  reported **alongside** it as a companion column (user, 2026-10-20, for the paper),
+  reported **alongside** it as a companion column (user, 2026-10-20),
   computed offline from the saved per-epoch curves by `scripts/val_selected.py` — no
   retraining, `utils/logger.py` unchanged. Where a job left no pickle, its `.txt` gives only
   the 10-epoch grid and the cell is marked grid-approximate. On MNISTSuperpixels the two
