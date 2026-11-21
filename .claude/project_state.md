@@ -4,6 +4,7 @@
 - Maintain a compact experiment runner for LDNA and baseline GNN models.
 - Keep the repository understandable through agent-facing documentation.
 - Optimization objectives, search spaces, experiment queue, and results are tracked in `.claude/experiments.md`.
+- Paper preparation for TMLR is underway. The paper calls the method RGNA (Rank-Gated Neighbourhood Aggregation); the code, configs and logs keep LDNA.
 
 ---
 
@@ -69,9 +70,10 @@
   order is already canonical. `ogbg-ppa` was out of scope for exactly that reason — featureless
   nodes make the feature-based sort non-permutation-invariant, which LDNA's MLP aggregator
   requires (the sort is a correctness requirement, not a performance lever) — and was
-  **readmitted 2026-08-04** once a featureless order was available: `canonicalize_graphs`
-  (pynauty, disk-cached, 2.87 ms/graph) supplies it and LDNA reads it through `rank_mode:
-  position`, which `utils/resolver.py` *requires* on ppa and raises otherwise, since a
+  **readmitted 2026-08-04** once a featureless order was available: a pynauty canonical labelling supplies it and LDNA
+  reads it through `rank_mode: position`. The resolver now uses the edge-coloured
+  `canonicalize_graphs_edge_colored`; the ranked ppa numbers predate that switch and come from the
+  vertex-only `canonicalize_graphs` (disk-cached, 2.87 ms/graph). `rank_mode: position` is what `utils/resolver.py` *requires* on ppa, raising otherwise, since a
   feature-mode rank over a constant node feature ties every node and turns the gate into a silent
   no-op. Both are covered in `.claude/experiments.md` § Datasets.
 - Node-level (transductive, per-node) prediction is wired end to end, without sampling or
@@ -202,7 +204,15 @@
   gate-init variant, with zero-init 138 kept alongside) while GIN sits on it exactly
   (EXP 0.5000 exactly, CEXP 0.7492 ≈ the theoretical 0.75, BREC 0) and DGN saturates EXP/CEXP and scores BREC **145** official (273 under
   shared canonicalization). LDNA with its gate removed and the labelling kept falls to the same
-  ceiling (EXP 0.5000, CEXP 0.7500, BREC 0; single-factor ablation above). BREC scores are **best across the 10 protocol seeds**, the benchmark's
+  ceiling (EXP 0.5000, CEXP 0.7500, BREC 0; single-factor ablation above), and so does replacing the
+  gate by an order-sensitive sequence aggregator over the same labelling (`aggr_mode`: PyG
+  MLP/GRU/LSTM aggregation, padded or real-length; every arm EXP 0.50, CEXP 0.75, BREC 0). The
+  reason is structural: nauty's root refinement is colour refinement, so every 1-WL class fills a
+  contiguous block of positions, in an order that depends only on the colours, and same-class
+  neighbours send identical messages, so the neighbour sequence carries only 1-WL information. The
+  gate escapes because it reads the numeric gap. On the theory side, strictness over 1-WL now holds
+  under every canonical labelling: one layer separates the 6-cycle from two triangles by its
+  signed-gap pairs, whatever the labelling. BREC scores are **best across the 10 protocol seeds**, the benchmark's
   own convention (revised 2026-07-29 from mean-only, which understated us against every published
   entry; means are kept alongside in `.claude/experiments.md`). These datasets are featureless, so
   the permutation-invariance device is a nauty canonical labelling (`data_utils/preprocess.py: canonicalize_graph(s)`) read by LDNA via
