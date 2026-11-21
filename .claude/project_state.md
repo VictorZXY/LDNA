@@ -181,21 +181,48 @@
   `weights_only=False`.
 - Expressiveness result (established; write-up lives in the git-ignored paper-prep area,
   not in project files). Proof idea on record:
-  - Claim: LDNA whose canonical rank comes from a canonical labelling (isomorphism-
-    invariant, tie-individualizing node order) is strictly more expressive than 1-WL.
+  - Claim: under every canonical labelling (an isomorphism-invariant order that individualizes
+    every node), LDNA is strictly more expressive than 1-WL, and even a single layer is not
+    bounded by 3-WL (folklore 2-FWL).
   - ⪰ 1-WL: with the rank gate frozen at identity the layer is a plain sum-of-messages
     aggregator; standard GIN-style injective simulation (finite domains, sum-injective
     encodings, self-argument in the update).
-  - Strictness: the gate reads the canonical-rank gap δ (via the [δ, |δ|, sign δ]
-    triple, which makes |δ| linearly available). On C_{2m} vs C_m⊔C_m (uniform
-    features — 1-WL-equivalent) with cyclic vs consecutive-block canonical labellings,
-    the per-node integer gap sums are {2m,2m,2,…} vs {m,m,m,m,2,…}: a gate g = 1+|δ|
-    plus injective update/readout separates them.
-  - Necessity: a rank computed from any 1-WL-invariant node quantity folds into the
-    endpoint colours (model collapses to exactly 1-WL); on vertex-transitive 1-WL-hard
-    pairs (Rook 4×4 vs Shrikhande, CSL) every isomorphism-invariant per-node quantity
-    ties all nodes, so δ ≡ 0 — only genuine canonical individualization helps, and it
-    preserves exact permutation invariance (orbit choices yield the same labelled graph).
+  - Strictness over 1-WL, every labelling, one layer: with constant messages and a gate
+    realising (δ, δ²), each node of a 2-regular graph reads the multiset of its two signed gaps,
+    hence the chord gap between its two neighbours. In C_3⊔C_3 every chord is the opposite edge,
+    so chord gaps and edge gaps form the same multiset under every labelling; in C_6 the chords
+    are the distance-2 pairs, and a parity count over the six positions shows that no labelling
+    makes the two multisets equal. Same parameters for every labelling.
+  - Not bounded by 3-WL, every labelling, two layers (hand proof): make each block of gate
+    channels the indicator of one gap value. Since the labelling is a bijection, every
+    neighbour sits at its own gap, so the first layer records which gaps a node's neighbours
+    occupy and the second adds each neighbour's own record. Signed gaps telescope
+    (r(w)−r(u) = (r(v)−r(u)) + (r(w)−r(v))), so a node places its neighbours' neighbours on one
+    axis and sees which of its neighbours are adjacent. Rook 4×4 neighbourhoods induce two
+    triangles and Shrikhande's a 6-cycle (both SRG(16,6,2,2), hence 2-FWL-indistinguishable),
+    so a counting readout separates them. In general two layers separate any two graphs whose
+    multisets of neighbourhood subgraphs differ; only bijectivity is used, canonicity only for
+    invariance.
+  - Not bounded by 3-WL, every labelling, one layer (computer-assisted): on featureless graphs
+    one layer reads exactly, and injectively, the multiset of the nodes' signed-offset sets. All
+    ordered graphs sharing that statistic can be listed position by position (the negative
+    offsets at a position are forced by the earlier ones). Two independent exhaustive
+    enumerations over all 16!/1152 ordered copies of Rook 4×4 found only four copies sharing the
+    statistic with any other graph, each with one other graph that is not strongly regular, so
+    no ordering of Shrikhande ever shares it. The coarser canonical gap multiset (behind the
+    earlier nauty-only certificate, gap sums 214 vs 220) is not labelling-uniform: explicit
+    labellings give the two graphs the same gap multiset, so that certificate is not used.
+  - Necessity, on vertex-transitive graphs only: a rank computed from any 1-WL-invariant node
+    quantity folds into the endpoint colours (exactly 1-WL on all graphs); on vertex-transitive
+    1-WL-hard pairs (Rook 4×4 vs Shrikhande, CSL) every isomorphism-invariant per-node quantity
+    ties all nodes, so δ ≡ 0 and the gate is constant. Individualization is required there, and
+    a canonical labelling provides it while keeping exact invariance (orbit choices yield the
+    same labelled graph). It is not required in general: an invariant but non-individualizing
+    rank such as a triangle count can beat 1-WL on a non-vertex-transitive pair.
+  - Sequence aggregators: under a standard individualization–refinement labelling (nauty's
+    among them), every aggregator that reads the neighbour messages as a sequence (MLP, GRU,
+    LSTM) is bounded by 1-WL on graphs without edge features; see the batch entry below for the
+    block argument.
   - Extras: random continuous init attains ≥ 1-WL a.s. (embeddings refine colours);
     strictness needs no randomness. Feature-tie sorting alone (no individualization)
     is exactly 1-WL — the sort is then purely the invariance device.
