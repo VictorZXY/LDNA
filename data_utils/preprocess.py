@@ -246,9 +246,13 @@ def edge_colored_canon_label(graph: Data):
             raise ValueError(f"Edge ({a}, {b}) appears twice with different attributes")
         multiplicity[(a, b)] = multiplicity.get((a, b), 0) + 1
     for (a, b), attr in directed.items():
-        if directed.get((b, a)) != attr or multiplicity[(b, a)] != multiplicity[(a, b)]:
+        if directed.get((b, a)) != attr:
             raise ValueError(f"Edge-coloured canonical labelling needs an undirected graph with "
                              f"symmetric attributes; edge ({a}, {b}) has no matching reverse")
+        if multiplicity[(b, a)] != multiplicity[(a, b)]:
+            raise ValueError(f"Edge-coloured canonical labelling needs an undirected graph; edge "
+                             f"({a}, {b}) appears {multiplicity[(a, b)]} times but its reverse appears "
+                             f"{multiplicity[(b, a)]} times")
 
     adjacency = {i: [] for i in range(n)}
     edge_cells = {}
